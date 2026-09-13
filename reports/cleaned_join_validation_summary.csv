@@ -1,0 +1,8 @@
+check,status,details
+IAM -> Identity user_id join,PASS,"20,000 matched / 0 unmatched among 20,000 usable IDs"
+Endpoint -> Identity user_id join,PASS,"8,000 matched / 0 unmatched among 8,000 usable IDs"
+Endpoint -> Identity hostname join,FAIL,"7,037 matched / 482 unmatched among 7,519 usable hostnames"
+Firewall -> Identity hostname join,FAIL,"26,665 matched / 1,578 unmatched among 28,243 usable hostnames"
+IAM -> Firewall session_id coverage,INFO,"261 matched / 11,263 unmatched among 11,524 usable session IDs"
+Identity unique user_id join key,PASS,0 duplicate cleaned user IDs
+Identity hostname uniqueness,PASS,0 duplicate cleaned hostnames

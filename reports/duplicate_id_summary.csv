@@ -1,0 +1,5 @@
+dataset,id_column,unique_ids,duplicate_id_values,rows_with_duplicate_ids
+firewall,log_id,30000,600,1200
+iam,event_id,20000,500,1000
+endpoint,alert_id,8000,240,480
+identity,user_id,3000,90,180

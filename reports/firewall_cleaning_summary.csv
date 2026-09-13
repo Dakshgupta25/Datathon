@@ -1,0 +1,2 @@
+dataset,raw_rows,cleaned_rows,exact_duplicate_rows_removed,timestamp_missing,timestamp_invalid_after_cleaning,src_ip_missing,src_ip_invalid,dst_ip_missing,dst_ip_invalid,src_port_missing,src_port_invalid,dst_port_missing,dst_port_invalid,bytes_sent_missing,bytes_sent_invalid,bytes_received_missing,bytes_received_invalid
+FIREWALL,30600,30000,600,3517,2986,1802,13471,1737,12756,3892,3608,4004,3556,3541,5101,3581,5086

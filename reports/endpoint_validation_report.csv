@@ -1,0 +1,13 @@
+check,value,expected,status
+cleaned_row_count,8000,8000,PASS
+exact_duplicate_rows,0,0,PASS
+duplicate_alert_ids,0,0,PASS
+invalid_user_ids,0,0,PASS
+invalid_severity_values,0,0,PASS
+invalid_status_values,0,0,PASS
+invalid_device_criticality_values,0,0,PASS
+invalid_detected_timestamps,0,0,PASS
+invalid_resolved_timestamps,0,0,PASS
+chronology_anomalies,263,flagged_only,PASS
+invalid_clean_sha256,0,0,PASS
+raw_columns_preserved,0,0,PASS

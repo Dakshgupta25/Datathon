@@ -1,0 +1,5 @@
+dataset,raw_rows,exact_duplicates_removed,cleaned_rows,rows_retained_percent,rows_removed_percent
+Identity,3090,90,3000,97.09,2.91
+IAM,20500,500,20000,97.56,2.44
+Endpoint,8240,240,8000,97.09,2.91
+Firewall,30600,600,30000,98.04,1.96

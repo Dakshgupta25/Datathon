@@ -1,0 +1,2 @@
+dataset,raw_rows,exact_duplicates_removed,cleaned_rows,user_id_invalid,severity_unmapped,status_unmapped,device_criticality_unmapped,detected_timestamp_invalid,resolved_timestamp_invalid,chronology_issues,hostname_invalid,sha256_invalid
+endpoint,8240,240,8000,0,0,0,0,0,0,263,0,799

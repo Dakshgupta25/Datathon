@@ -1,0 +1,2 @@
+dataset,raw_rows,exact_duplicate_rows_removed,cleaned_rows,user_id_invalid,department_unmapped,event_type_unmapped,mfa_invalid,timestamp_invalid,source_ip_invalid,risk_invalid_range,risk_invalid_format,risk_categorical,risk_missing,output_file
+IAM,20500,500,20000,0,0,0,0,4395,10117,2607,0,1353,1037,D:\Datathon\data\cleaned\iam_cleaned.csv

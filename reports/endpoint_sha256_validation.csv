@@ -1,0 +1,4 @@
+sha256_status,count
+valid_sha256,5941
+missing,1484
+invalid_length,815

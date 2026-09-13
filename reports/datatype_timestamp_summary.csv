@@ -1,0 +1,7 @@
+dataset,column,original_dtype,total_rows,raw_missing,non_missing,parseable_values,parse_failures,parse_success_rate_pct,unique_raw_values
+FIREWALL,timestamp,str,30600,3598,27002,23942,3060,88.67,21609
+IAM,timestamp,str,20500,0,20500,16014,4486,78.12,14420
+ENDPOINT,detected_timestamp,str,8240,1006,7234,6415,819,88.68,5811
+ENDPOINT,resolved_timestamp,str,8240,2405,5835,5202,633,89.15,4716
+IDENTITY,hire_date,str,3090,337,2753,2445,308,88.81,2645
+IDENTITY,termination_date,str,3090,1825,1265,348,917,27.51,368

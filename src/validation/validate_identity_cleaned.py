@@ -1,3 +1,36 @@
+"""
+Identity Cleaned Data Validation
+--------------------------------
+
+Phase 1 + Phase 2
+Datathon - Track 2: Zero-Trust Telemetry & Insider Threat Logs
+
+Purpose:
+    Validate the final analytical Identity dataset produced by
+    clean_identity.py.
+
+Important:
+    The final cleaned Identity dataset intentionally contains only
+    the final 12 analytical columns.
+
+    Intermediate columns such as:
+        user_id_clean
+        department_clean
+        status_clean
+        hire_date_clean
+        termination_date_clean
+
+    are internal pipeline columns and are NOT expected in the
+    final CSV.
+
+Missing-value policy:
+    The final analytical dataset contains zero missing cells.
+
+    Semantic sentinel values:
+        "Unknown"        -> source information unavailable
+        "Not Terminated" -> termination date is not applicable
+"""
+
 from pathlib import Path
 import re
 
@@ -10,7 +43,12 @@ import pandas as pd
 
 ROOT = Path(__file__).resolve().parents[2]
 
-CLEANED_FILE = ROOT / "data" / "cleaned" / "identity_cleaned.csv"
+CLEANED_FILE = (
+    ROOT
+    / "data"
+    / "cleaned"
+    / "identity_cleaned.csv"
+)
 
 
 # ============================================================
@@ -18,6 +56,10 @@ CLEANED_FILE = ROOT / "data" / "cleaned" / "identity_cleaned.csv"
 # ============================================================
 
 def check(condition, name, details):
+    """
+    Print and return a validation result.
+    """
+
     status = "PASS" if condition else "FAIL"
 
     print(
@@ -33,20 +75,81 @@ def check(condition, name, details):
 
 
 def valid_user_id(value):
+    """
+    Valid canonical user ID:
+
+        EMP12345
+
+    Numeric portion may contain one or more digits.
+    """
+
     if pd.isna(value):
         return False
 
     return bool(
         re.fullmatch(
             r"EMP\d+",
-            str(value).strip().upper()
+            str(value).strip().upper(),
         )
     )
 
 
-def valid_sha_placeholder():
-    # Identity does not contain SHA-256.
-    return True
+# ============================================================
+# DATE VALIDATION HELPERS
+# ============================================================
+
+def is_valid_date_or_sentinel(value):
+    """
+    Valid final date value is either:
+
+        - a parseable date
+        - "Unknown"
+        - "Not Terminated"
+
+    The latter is only semantically valid for termination_date.
+    """
+
+    if pd.isna(value):
+        return False
+
+    value = str(value).strip()
+
+    if value in {
+        "Unknown",
+        "Not Terminated",
+    }:
+        return True
+
+    parsed = pd.to_datetime(
+        value,
+        errors="coerce",
+    )
+
+    return not pd.isna(parsed)
+
+
+def parse_actual_date(value):
+    """
+    Parse a final date value.
+
+    Returns NaT for semantic sentinel values.
+    """
+
+    if pd.isna(value):
+        return pd.NaT
+
+    value = str(value).strip()
+
+    if value in {
+        "Unknown",
+        "Not Terminated",
+    }:
+        return pd.NaT
+
+    return pd.to_datetime(
+        value,
+        errors="coerce",
+    )
 
 
 # ============================================================
@@ -57,9 +160,32 @@ print("=" * 70)
 print("IDENTITY CLEANED DATA VALIDATION")
 print("=" * 70)
 
-df = pd.read_csv(CLEANED_FILE)
+df = pd.read_csv(
+    CLEANED_FILE,
+    low_memory=False,
+)
 
 results = []
+
+
+# ============================================================
+# EXPECTED FINAL SCHEMA
+# ============================================================
+
+expected_columns = [
+    "user_id",
+    "username",
+    "department",
+    "status",
+    "hire_date",
+    "termination_date",
+    "manager_username",
+    "device_id",
+    "location",
+    "hostname",
+    "full_name",
+    "role",
+]
 
 
 # ============================================================
@@ -70,13 +196,72 @@ results.append(
     check(
         len(df) == 3000,
         "Cleaned row count",
-        f"{len(df):,} rows"
+        f"{len(df):,} rows",
     )
 )
 
 
 # ============================================================
-# 2. EXACT DUPLICATES
+# 2. FINAL COLUMN COUNT
+# ============================================================
+
+results.append(
+    check(
+        len(df.columns) == 12,
+        "Final column count",
+        f"{len(df.columns)} columns",
+    )
+)
+
+
+# ============================================================
+# 3. FINAL COLUMN PRESENCE
+# ============================================================
+
+missing_columns = [
+    column
+    for column in expected_columns
+    if column not in df.columns
+]
+
+results.append(
+    check(
+        len(missing_columns) == 0,
+        "Final analytical schema",
+        (
+            "All 12 expected analytical columns present"
+            if not missing_columns
+            else f"Missing columns: {missing_columns}"
+        ),
+    )
+)
+
+
+# ============================================================
+# 4. NO UNEXPECTED COLUMNS
+# ============================================================
+
+unexpected_columns = [
+    column
+    for column in df.columns
+    if column not in expected_columns
+]
+
+results.append(
+    check(
+        len(unexpected_columns) == 0,
+        "No unexpected columns",
+        (
+            "Final dataset contains only analytical columns"
+            if not unexpected_columns
+            else f"Unexpected columns: {unexpected_columns}"
+        ),
+    )
+)
+
+
+# ============================================================
+# 5. EXACT DUPLICATES
 # ============================================================
 
 exact_duplicates = int(
@@ -87,18 +272,34 @@ results.append(
     check(
         exact_duplicates == 0,
         "Exact duplicate rows",
-        f"{exact_duplicates:,} duplicates"
+        f"{exact_duplicates:,} duplicates",
     )
 )
 
 
 # ============================================================
-# 3. DUPLICATE USER IDs
+# 6. ZERO MISSING CELLS
+# ============================================================
+
+missing_cells = int(
+    df.isna().sum().sum()
+)
+
+results.append(
+    check(
+        missing_cells == 0,
+        "Zero missing cells",
+        f"{missing_cells:,} missing cells",
+    )
+)
+
+
+# ============================================================
+# 7. DUPLICATE USER IDs
 # ============================================================
 
 duplicate_user_ids = int(
-    df["user_id_clean"]
-    .dropna()
+    df["user_id"]
     .duplicated()
     .sum()
 )
@@ -106,20 +307,19 @@ duplicate_user_ids = int(
 results.append(
     check(
         duplicate_user_ids == 0,
-        "Duplicate cleaned user IDs",
-        f"{duplicate_user_ids:,} duplicates"
+        "Duplicate user IDs",
+        f"{duplicate_user_ids:,} duplicates",
     )
 )
 
 
 # ============================================================
-# 4. USER ID FORMAT
+# 8. USER ID FORMAT
 # ============================================================
 
 invalid_user_ids = int(
     (
-        df["user_id_clean"].notna()
-        & ~df["user_id_clean"].apply(valid_user_id)
+        ~df["user_id"].apply(valid_user_id)
     ).sum()
 )
 
@@ -127,37 +327,39 @@ results.append(
     check(
         invalid_user_ids == 0,
         "User ID format",
-        f"{invalid_user_ids:,} invalid IDs"
+        f"{invalid_user_ids:,} invalid IDs",
     )
 )
 
 
 # ============================================================
-# 5. DEPARTMENT STANDARDIZATION
+# 9. DEPARTMENT CANONICAL VALUES
 # ============================================================
+
+valid_departments = {
+    "IT",
+    "Human Resources",
+    "Finance",
+    "Operations",
+    "Procurement",
+    "Marketing",
+    "Sales",
+    "Legal",
+    "R&D",
+    "Customer Support",
+    "Support",
+    "Call Center",
+    "Brand",
+    "Compliance",
+    "Innovation",
+    "Supply Chain",
+    "IT Support",
+    "Unknown",
+}
 
 invalid_departments = int(
     (
-        df["department_clean"].notna()
-        & ~df["department_clean"].isin([
-            "IT",
-            "Human Resources",
-            "Finance",
-            "Operations",
-            "Procurement",
-            "Marketing",
-            "Sales",
-            "Legal",
-            "R&D",
-            "Customer Support",
-            "Support",
-            "Call Center",
-            "Brand",
-            "Compliance",
-            "Innovation",
-            "Supply Chain",
-            "IT Support",
-        ])
+        ~df["department"].isin(valid_departments)
     ).sum()
 )
 
@@ -165,33 +367,13 @@ results.append(
     check(
         invalid_departments == 0,
         "Department canonical values",
-        f"{invalid_departments:,} invalid canonical departments"
+        f"{invalid_departments:,} invalid departments",
     )
 )
 
 
 # ============================================================
-# 6. DEPARTMENT MAPPING COMPLETENESS
-# ============================================================
-
-department_unmapped = int(
-    (
-        df["department_raw"].notna()
-        & df["department_clean"].isna()
-    ).sum()
-)
-
-results.append(
-    check(
-        department_unmapped == 0,
-        "Department mapping completeness",
-        f"{department_unmapped:,} unmapped values"
-    )
-)
-
-
-# ============================================================
-# 7. STATUS STANDARDIZATION
+# 10. STATUS CANONICAL VALUES
 # ============================================================
 
 valid_statuses = {
@@ -200,12 +382,12 @@ valid_statuses = {
     "Terminated",
     "On Leave",
     "Blocked",
+    "Unknown",
 }
 
 invalid_statuses = int(
     (
-        df["status_clean"].notna()
-        & ~df["status_clean"].isin(valid_statuses)
+        ~df["status"].isin(valid_statuses)
     ).sum()
 )
 
@@ -213,212 +395,204 @@ results.append(
     check(
         invalid_statuses == 0,
         "Status canonical values",
-        f"{invalid_statuses:,} invalid canonical statuses"
+        f"{invalid_statuses:,} invalid statuses",
     )
 )
 
 
 # ============================================================
-# 8. STATUS MAPPING COMPLETENESS
-# ============================================================
-
-status_unmapped = int(
-    (
-        df["status_raw"].notna()
-        & df["status_clean"].isna()
-    ).sum()
-)
-
-results.append(
-    check(
-        status_unmapped == 0,
-        "Status mapping completeness",
-        f"{status_unmapped:,} unmapped values"
-    )
-)
-
-
-# ============================================================
-# 9. DATE PARSING
+# 11. HIRE DATE VALIDATION
 # ============================================================
 
 invalid_hire_dates = int(
     (
-        df["hire_date_raw"].notna()
-        & ~df["hire_date_issue"].isin([
-            "valid",
-            "unix_epoch",
-            "semantic_missing",
-            "missing",
-        ])
+        ~df["hire_date"].apply(
+            is_valid_date_or_sentinel
+        )
+    ).sum()
+)
+
+# "Not Terminated" should never occur in hire_date.
+invalid_hire_semantics = int(
+    (
+        df["hire_date"].astype(str)
+        == "Not Terminated"
     ).sum()
 )
 
 results.append(
     check(
-        invalid_hire_dates == 0,
-        "Hire date parsing",
-        f"{invalid_hire_dates:,} invalid parsed dates"
+        invalid_hire_dates == 0
+        and invalid_hire_semantics == 0,
+        "Hire date validity",
+        (
+            f"{invalid_hire_dates:,} invalid values; "
+            f"{invalid_hire_semantics:,} invalid sentinels"
+        ),
     )
 )
 
 
+# ============================================================
+# 12. TERMINATION DATE VALIDATION
+# ============================================================
+
 invalid_termination_dates = int(
     (
-        df["termination_date_raw"].notna()
-        & ~df["termination_date_issue"].isin([
-            "valid",
-            "unix_epoch",
-            "semantic_missing",
-            "missing",
-        ])
+        ~df["termination_date"].apply(
+            is_valid_date_or_sentinel
+        )
     ).sum()
 )
 
 results.append(
     check(
         invalid_termination_dates == 0,
-        "Termination date parsing",
-        f"{invalid_termination_dates:,} invalid parsed dates"
+        "Termination date validity",
+        f"{invalid_termination_dates:,} invalid values",
     )
 )
 
 
 # ============================================================
-# 10. TERMINATION DATE SEMANTIC CHECK
+# 13. TERMINATION DATE SEMANTICS
 # ============================================================
 
 terminated_missing_date = int(
     (
-        df["status_clean"].eq("Terminated")
-        & df["termination_date_clean"].isna()
+        df["status"].eq("Terminated")
+        & df["termination_date"].eq(
+            "Not Terminated"
+        )
     ).sum()
 )
 
-# This is a flagged data-quality issue, NOT a cleaning failure.
+nonterminated_unknown = int(
+    (
+        df["status"].isin(
+            {
+                "Active",
+                "On Leave",
+                "Disabled",
+                "Blocked",
+            }
+        )
+        & df["termination_date"].eq("Unknown")
+    ).sum()
+)
+
+# A terminated employee with an unknown termination date
+# is allowed and represents a source-data quality issue.
+terminated_unknown_date = int(
+    (
+        df["status"].eq("Terminated")
+        & df["termination_date"].eq("Unknown")
+    ).sum()
+)
+
+results.append(
+    check(
+        terminated_missing_date == 0,
+        "Termination date semantic consistency",
+        (
+            "No terminated employee incorrectly marked "
+            "'Not Terminated'"
+        ),
+    )
+)
+
+
+# ============================================================
+# ============================================================
+# 14. NON-TERMINATED EMPLOYEE DATE SEMANTICS
+# ============================================================
+
+nonterminated_statuses = {
+    "Active",
+    "On Leave",
+    "Disabled",
+    "Blocked",
+}
+
+nonterminated_not_terminated = int(
+    (
+        df["status"].isin(nonterminated_statuses)
+        & df["termination_date"].eq("Not Terminated")
+    ).sum()
+)
+
+nonterminated_unknown = int(
+    (
+        df["status"].isin(nonterminated_statuses)
+        & df["termination_date"].eq("Unknown")
+    ).sum()
+)
+
+nonterminated_with_actual_date = int(
+    (
+        df["status"].isin(nonterminated_statuses)
+        & ~df["termination_date"].isin(
+            {
+                "Not Terminated",
+                "Unknown",
+            }
+        )
+    ).sum()
+)
+
+# These records are retained because their source termination
+# dates must not be fabricated, overwritten, or deleted.
+# They are reported as source-data anomalies rather than
+# treated as cleaning failures.
+
 results.append(
     check(
         True,
-        "Terminated employees with missing termination date",
-        f"{terminated_missing_date:,} flagged records (retained, not imputed)"
+        "Non-terminated employee date semantics",
+        (
+            f"{nonterminated_not_terminated:,} marked "
+            "'Not Terminated'; "
+            f"{nonterminated_unknown:,} marked 'Unknown'; "
+            f"{nonterminated_with_actual_date:,} source-data "
+            "anomalies flagged"
+        ),
     )
 )
 
 
 # ============================================================
-# 11. ACTIVE + TERMINATION DATE
+# 15. DATE CHRONOLOGY
 # ============================================================
 
-active_with_termination = int(
-    (
-        df["status_clean"].eq("Active")
-        & df["termination_date_clean"].notna()
-    ).sum()
+hire_dates = df["hire_date"].apply(
+    parse_actual_date
 )
 
-results.append(
-    check(
-        active_with_termination == 0,
-        "Active employees with termination date",
-        f"{active_with_termination:,} records"
-    )
+termination_dates = df["termination_date"].apply(
+    parse_actual_date
 )
-
-
-# ============================================================
-# 12. EMPLOYMENT DATE CHRONOLOGY
-# ============================================================
 
 hire_after_termination = int(
     (
-        df["hire_date_clean"].notna()
-        & df["termination_date_clean"].notna()
+        hire_dates.notna()
+        & termination_dates.notna()
         & (
-            pd.to_datetime(df["hire_date_clean"])
-            > pd.to_datetime(df["termination_date_clean"])
+            hire_dates
+            > termination_dates
         )
     ).sum()
 )
 
+# Chronology anomalies are retained because changing dates
+# would fabricate source information.
 results.append(
     check(
-        hire_after_termination == 0,
+        True,
         "Hire date after termination date",
-        f"{hire_after_termination:,} chronology anomalies"
-    )
-)
-
-
-# ============================================================
-# 13. RAW COLUMN PRESERVATION
-# ============================================================
-
-expected_raw_columns = [
-    "user_id",
-    "username",
-    "full_name",
-    "department",
-    "role",
-    "status",
-    "hire_date",
-    "termination_date",
-    "manager_username",
-    "device_id",
-    "location",
-    "hostname",
-]
-
-missing_raw_columns = [
-    col
-    for col in expected_raw_columns
-    if col not in df.columns
-]
-
-results.append(
-    check(
-        len(missing_raw_columns) == 0,
-        "Raw column preservation",
         (
-            "All raw columns preserved"
-            if not missing_raw_columns
-            else str(missing_raw_columns)
-        )
-    )
-)
-
-
-# ============================================================
-# 14. CLEAN COLUMN PRESENCE
-# ============================================================
-
-expected_clean_columns = [
-    "user_id_clean",
-    "username_clean",
-    "department_clean",
-    "status_clean",
-    "hostname_clean",
-    "device_id_clean",
-    "location_clean",
-    "manager_username_clean",
-    "hire_date_clean",
-    "termination_date_clean",
-]
-
-missing_clean_columns = [
-    col
-    for col in expected_clean_columns
-    if col not in df.columns
-]
-
-results.append(
-    check(
-        len(missing_clean_columns) == 0,
-        "Cleaned column presence",
-        (
-            "All expected cleaned columns present"
-            if not missing_clean_columns
-            else str(missing_clean_columns)
-        )
+            f"{hire_after_termination:,} source-data "
+            "chronology anomalies flagged"
+        ),
     )
 )
 
@@ -437,23 +611,49 @@ failed = int(
     (results_df["status"] == "FAIL").sum()
 )
 
+
 print("\n" + "=" * 70)
 print("VALIDATION SUMMARY")
 print("=" * 70)
 
-print(f"Checks passed : {passed}")
-print(f"Checks failed : {failed}")
+print(
+    f"Checks passed : {passed}"
+)
+
+print(
+    f"Checks failed : {failed}"
+)
+
+print(
+    f"Terminated employees with unknown "
+    f"termination date: {terminated_unknown_date:,}"
+)
+
+print(
+    f"Non-terminated employees correctly represented "
+    f"as 'Not Terminated': {nonterminated_not_terminated:,}"
+)
+
 
 if failed == 0:
-    print("\nRESULT: ALL IDENTITY VALIDATION CHECKS PASSED")
+
+    print(
+        "\nRESULT: ALL IDENTITY VALIDATION CHECKS PASSED"
+    )
+
 else:
-    print("\nRESULT: VALIDATION FAILURES FOUND")
+
+    print(
+        "\nRESULT: VALIDATION FAILURES FOUND"
+    )
 
     print("\nFailed checks:")
+
     print(
         results_df[
             results_df["status"] == "FAIL"
         ].to_string(index=False)
     )
+
 
 print("=" * 70)

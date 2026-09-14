@@ -1,0 +1,19 @@
+check,value,expected,status
+Cleaned row count,"30,000 rows","30,000 rows",PASS
+Final analytical schema,15 columns,15 columns,PASS
+Exact duplicate rows,0,0,PASS
+Duplicate log IDs,0,0,PASS
+Log ID validity,0,0,PASS
+Timestamp validity,0,0,PASS
+Source IP validity,0,0,PASS
+Destination IP validity,0,0,PASS
+Source port validity,0,0,PASS
+Destination port validity,0,0,PASS
+Bytes sent validity,0,0,PASS
+Bytes received validity,0,0,PASS
+Protocol standardization,0,0,PASS
+Action standardization,0,0,PASS
+Threat flag validity,0,0,PASS
+Final missing cells,0,0,PASS
+Empty string cells,0,0,PASS
+Duplicate removal reconciliation,600,600,PASS

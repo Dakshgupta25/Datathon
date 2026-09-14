@@ -1,54 +1,63 @@
 # TransOrg AgentIQ Datathon — Track 2
+
 ## Zero-Trust Telemetry & Insider Threat Logs
 
 ### Data Rescue, Cleaning & Analytics-Ready Data Layer
 
-This repository contains the data engineering and data quality work for **Track 2 Ã¢â‚¬â€ Cybersecurity: Zero-Trust Telemetry & Insider Threat Logs**.
+This repo holds the data engineering side of our work for Track 2: Cybersecurity — Zero-Trust Telemetry & Insider Threat Logs — data rescue, cleaning, validation, and the quality documentation that goes with it.
 
-The focus of this stage is to rescue the supplied messy cybersecurity datasets, standardize and validate them, preserve source traceability, and produce clean datasets suitable for downstream analytics.
+The idea for this stage was pretty simple to state, if not to do: take the messy cybersecurity datasets we were handed, clean and standardize them, check the quality of what came out, keep the raw source data around, write down every major cleaning decision we made, and end up with consistent datasets that are actually ready for analysis.
 
-> **Scope:** This repository currently covers the data rescue, cleaning, validation, data-quality documentation, and analytics-ready data layer. Dashboard and AI-agent development are outside the current scope.
+> **Scope:** This repo covers Phase 1 and Phase 2 only — data rescue, cleaning, validation, data-quality documentation, and the analytics-ready data layer. The dashboard and the AI agent are separate efforts and not part of this repo.
 
 ---
 
 # 1. Project Objective
 
-The supplied cybersecurity data contains common real-world data-quality problems including:
+The data we started with had basically every real-world data-quality problem you'd expect to run into:
 
 - duplicate records
 - inconsistent categorical values
-- inconsistent user and hostname representations
+- inconsistent user ID representations
+- inconsistent hostname representations
 - missing values
 - malformed IP addresses
 - invalid network ports
 - invalid byte values
 - mixed timestamp formats
 - malformed SHA-256 values
-- inconsistent authentication/MFA representations
-- invalid/out-of-range risk scores
+- inconsistent authentication and MFA representations
+- invalid or out-of-range risk scores
 - cross-dataset join-key inconsistencies
-- source-data coverage gaps
+- gaps in source data coverage
 
-The objective of this data engineering stage is to transform these datasets into consistent and validated analytical inputs without fabricating source information.
+Our objective was to turn all of that into consistent, validated data we could actually build on — without ever inventing information the source data didn't support.
 
 ---
 
 # 2. Source Datasets
 
-Four datasets are processed.
+We worked through four datasets in total.
 
-| Dataset | Purpose | Raw Rows | Cleaned Rows |
-|---|---|---:|---:|
-| Identity | Employee identity and asset master | 3,090 | 3,000 |
-| IAM | Identity and access management telemetry | 20,500 | 20,000 |
-| Endpoint | Endpoint security alerts | 8,240 | 8,000 |
-| Firewall | Network firewall telemetry | 30,600 | 30,000 |
+| Dataset | Purpose | Raw Rows | Cleaned Rows | Exact Duplicates Removed |
+|---|---|---:|---:|---:|
+| Identity | Employee identity and asset master | 3,090 | 3,000 | 90 |
+| IAM | Identity and access management telemetry | 20,500 | 20,000 | 500 |
+| Endpoint | Endpoint security alerts | 8,240 | 8,000 | 240 |
+| Firewall | Network firewall telemetry | 30,600 | 30,000 | 600 |
 
-### Cleaned data location
+That comes out to **58,000** cleaned telemetry/event records in total, plus **3,000** cleaned Identity master records.
 
-```text
+---
+
+# 3. Final Cleaned Data
+
+The final analytical datasets live here:
+
+```
 data/cleaned/
-ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€šÃ‚ÂÃƒÆ’Ã¢â‚¬Â¦ÃƒÂ¢Ã¢â€šÂ¬Ã…â€œÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€šÃ‚ÂÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€šÃ‚ÂÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡Ãƒâ€šÃ‚Â¬ identity_cleaned.csv
-ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€šÃ‚ÂÃƒÆ’Ã¢â‚¬Â¦ÃƒÂ¢Ã¢â€šÂ¬Ã…â€œÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€šÃ‚ÂÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€šÃ‚ÂÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡Ãƒâ€šÃ‚Â¬ iam_cleaned.csv
-ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€šÃ‚ÂÃƒÆ’Ã¢â‚¬Â¦ÃƒÂ¢Ã¢â€šÂ¬Ã…â€œÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€šÃ‚ÂÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€šÃ‚ÂÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡Ãƒâ€šÃ‚Â¬ endpoint_cleaned.csv
-ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€šÃ‚ÂÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€šÃ‚ÂÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€šÃ‚ÂÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€šÃ‚ÂÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡Ãƒâ€šÃ‚Â¬ firewall_cleaned.csv
+├── identity_cleaned.csv
+├── iam_cleaned.csv
+├── endpoint_cleaned.csv
+└── firewall_cleaned.csv
+```

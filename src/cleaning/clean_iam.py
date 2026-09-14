@@ -1,7 +1,36 @@
-from pathlib import Path
-import ipaddress
-import re
+"""
+IAM Data Cleaning Pipeline
+Track 2 — Zero-Trust Telemetry & Insider Threat Logs
 
+Phase 1 + Phase 2
+-----------------
+Cleans the raw IAM audit trail and produces an analysis-ready CSV.
+
+Input:
+    data/raw/track2_iam_audit_trail.json
+
+Output:
+    data/cleaned/iam_cleaned.csv
+
+Cleaning principles:
+    - Raw data is never modified.
+    - Exact duplicate rows are removed.
+    - Equivalent representations are standardized.
+    - Invalid IP addresses are represented as "Unknown".
+    - Invalid/out-of-range risk scores are imputed using the median
+      of valid numeric risk scores.
+    - Missing categorical values use documented semantic values.
+    - Failure reasons follow event-type semantics.
+    - Final output contains zero missing cells.
+    - The pipeline is reproducible from the raw source.
+"""
+
+from pathlib import Path
+import re
+import json
+import ipaddress
+
+import numpy as np
 import pandas as pd
 
 
@@ -11,582 +40,620 @@ import pandas as pd
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
 
-RAW_PATH = PROJECT_ROOT / "data" / "raw" / "track2_iam_audit_trail.json"
-CLEANED_PATH = PROJECT_ROOT / "data" / "cleaned" / "iam_cleaned.csv"
-SUMMARY_PATH = PROJECT_ROOT / "reports" / "iam_cleaning_summary.csv"
+RAW_FILE = (
+    PROJECT_ROOT
+    / "data"
+    / "raw"
+    / "track2_iam_audit_trail.json"
+)
+
+OUTPUT_FILE = (
+    PROJECT_ROOT
+    / "data"
+    / "cleaned"
+    / "iam_cleaned.csv"
+)
 
 
 # ============================================================
-# HELPER FUNCTIONS
+# EXPECTED FINAL SCHEMA
 # ============================================================
 
-def is_missing(value):
-    """Safely identify missing values."""
-    return pd.isna(value)
+FINAL_COLUMNS = [
+    "event_id",
+    "timestamp",
+    "user_id",
+    "username",
+    "department",
+    "event_type",
+    "auth_method",
+    "source_ip",
+    "hostname",
+    "device_id",
+    "session_id",
+    "mfa_passed",
+    "failure_reason",
+    "risk_score",
+    "geo_location",
+]
+
+
+# ============================================================
+# GENERAL HELPERS
+# ============================================================
+
+NA_LIKE_VALUES = {
+    "",
+    "NA",
+    "N/A",
+    "NONE",
+    "NULL",
+    "NAN",
+    "NOT AVAILABLE",
+    "NOT_AVAILABLE",
+}
 
 
 def normalize_text(value):
-    """Strip whitespace and normalize text."""
-    if is_missing(value):
-        return None
+    """Strip whitespace and convert obvious missing markers to NaN."""
 
-    text = str(value).strip()
-
-    if text == "":
-        return None
-
-    return text
-
-
-# ============================================================
-# USER ID CLEANING
-# ============================================================
-
-def clean_user_id(value):
-    """
-    Convert user IDs into canonical EMP12345 format.
-
-    Examples:
-        emp12345   -> EMP12345
-        EMP-12345  -> EMP12345
-        EMP 12345  -> EMP12345
-        12345      -> EMP12345
-    """
-
-    if is_missing(value):
-        return pd.NA
-
-    text = str(value).strip().upper()
-
-    # Remove spaces, hyphens and underscores
-    text = re.sub(r"[\s\-_]", "", text)
-
-    if text == "":
-        return pd.NA
-
-    # Numeric-only IDs receive EMP prefix
-    if text.isdigit():
-        text = "EMP" + text
-
-    return text
-
-
-def validate_user_id(value):
-    """Validate canonical EMP + numeric ID format."""
+    if value is None:
+        return np.nan
 
     if pd.isna(value):
-        return pd.NA
+        return np.nan
 
-    return bool(re.fullmatch(r"EMP\d+", str(value)))
+    value = str(value).strip()
+
+    if value.upper() in NA_LIKE_VALUES:
+        return np.nan
+
+    return value
 
 
 # ============================================================
-# DEPARTMENT STANDARDIZATION
+# USER ID
+# ============================================================
+
+def normalize_user_id(value):
+    """
+    Standardize employee IDs.
+
+    Examples:
+        EMP12345
+        emp12345
+        EMP-12345
+        EMP 12345
+        12345
+
+    become:
+        EMP12345
+    """
+
+    value = normalize_text(value)
+
+    if pd.isna(value):
+        return np.nan
+
+    value = str(value).strip().upper()
+
+    # Remove spaces and hyphens.
+    value = re.sub(r"[\s\-_]", "", value)
+
+    # Numeric-only IDs.
+    if value.isdigit():
+        return f"EMP{value}"
+
+    # EMP + numeric ID.
+    match = re.fullmatch(r"EMP(\d+)", value)
+
+    if match:
+        return f"EMP{match.group(1)}"
+
+    return value
+
+
+# ============================================================
+# HOSTNAME
+# ============================================================
+
+def normalize_hostname(value):
+    """Normalize hostname formatting."""
+
+    value = normalize_text(value)
+
+    if pd.isna(value):
+        return np.nan
+
+    value = str(value).strip().upper()
+
+    # Underscore -> hyphen.
+    value = value.replace("_", "-")
+
+    # Remove known corporate suffix.
+    value = re.sub(
+        r"\.CORP\.LOCAL$",
+        "",
+        value,
+    )
+
+    return value
+
+
+# ============================================================
+# DEPARTMENT
 # ============================================================
 
 DEPARTMENT_MAP = {
-    # Procurement
-    "procurement": "Procurement",
-    "procurement team": "Procurement",
-    "purchase": "Procurement",
-    "purch": "Procurement",
+    # IT
+    "it": "IT",
+    "it dept": "IT",
+    "information technology": "IT",
+    "information tech": "IT",
 
-    # Human Resources
+    # HR
     "hr": "Human Resources",
+    "hr dept": "Human Resources",
     "human resource": "Human Resources",
     "human resources": "Human Resources",
-    "hr dept": "Human Resources",
+    "people team": "Human Resources",
 
-    # Information Technology
-    "it": "Information Technology",
-    "it dept": "Information Technology",
-    "information tech": "Information Technology",
-    "information technology": "Information Technology",
+    # R&D
+    "r&d": "R&D",
+    "rd": "R&D",
+    "rnd": "R&D",
+    "research and development": "R&D",
 
-    # Keep IT Support separate because it may represent a
-    # distinct organizational function.
-    "it support": "IT Support",
+    # Operations
+    "ops": "Operations",
+    "ops team": "Operations",
+    "operations": "Operations",
+    "operations dept": "Operations",
 
-    # Customer Support
-    "cs": "Customer Support",
-    "customer care": "Customer Support",
-    "support": "Customer Support",
-    "customer support": "Customer Support",
-    "call center": "Customer Support",
-
-    # Brand
-    "brand team": "Brand Team",
-
-    # Research and Development
-    "r&d": "Research and Development",
-    "rnd": "Research and Development",
-    "rd": "Research and Development",
-    "research and development": "Research and Development",
+    # Marketing
+    "mkt": "Marketing",
+    "mktg": "Marketing",
+    "marketing": "Marketing",
+    "marketing dept": "Marketing",
 
     # Finance
     "finance": "Finance",
     "fin": "Finance",
     "finance dept": "Finance",
+    "accounts": "Finance",
 
-    # Marketing
-    "marketing": "Marketing",
-    "marketing dept": "Marketing",
-    "mkt": "Marketing",
-    "mktg": "Marketing",
-
-    # Operations
-    "operations": "Operations",
-    "ops": "Operations",
-    "ops team": "Operations",
-    "operations dept": "Operations",
-
-    # Sales
-    "sales": "Sales",
-    "sales team": "Sales",
-    "sales dept": "Sales",
+    # Procurement
+    "purchase": "Procurement",
+    "purch": "Procurement",
+    "procurement": "Procurement",
+    "procurement team": "Procurement",
 
     # Legal
     "legal": "Legal",
     "legal dept": "Legal",
 
-    # Other observed departments
-    "accounts": "Accounts",
+    # Sales
+    "sales": "Sales",
+    "sales team": "Sales",
+    "sales dept": "Sales",
+    "business sales": "Sales",
+
+    # Customer Support
+    "cs": "Customer Support",
+    "customer care": "Customer Support",
+    "customer support": "Customer Support",
+
+    # Other known categories
+    "support": "Support",
+    "it support": "IT Support",
+    "brand": "Brand",
+    "brand team": "Brand",
     "compliance": "Compliance",
     "innovation": "Innovation",
     "supply chain": "Supply Chain",
-    "business sales": "Business Sales",
-    "people team": "People Team",
+    "call center": "Call Center",
 }
 
 
-def clean_department(value):
-    """
-    Apply an explicit controlled department mapping.
+def normalize_department(value):
+    """Map known department variants to canonical labels."""
 
-    Unknown values are NOT guessed.
-    Missing values remain missing.
-    """
+    value = normalize_text(value)
 
-    if is_missing(value):
-        return pd.NA
+    if pd.isna(value):
+        return np.nan
 
-    text = str(value).strip().lower()
+    key = str(value).strip().lower()
 
-    if text == "":
-        return pd.NA
-
-    return DEPARTMENT_MAP.get(text, pd.NA)
-
-
-def department_status(raw_value, clean_value):
-    """Describe department cleaning outcome."""
-
-    if is_missing(raw_value):
-        return "missing"
-
-    if is_missing(clean_value):
-        return "unmapped"
-
-    return "mapped"
+    return DEPARTMENT_MAP.get(key, str(value).strip())
 
 
 # ============================================================
-# EVENT TYPE STANDARDIZATION
+# EVENT TYPE
 # ============================================================
 
-# All values are represented in their normalized form because
-# normalize_event_key() converts spaces/hyphens to underscores.
-
-LOGIN_SUCCESS_VARIANTS = {
-    "SSO_SUCCESS",
-    "SUCCESS_LOGIN",
-    "AUTH_SUCCESS",
-    "LOGIN_SUCCESS",
-    "SUCCESSFUL_LOGIN",
-    "LOGON_SUCCESS",
+SUCCESS_EVENTS = {
+    "sso_success",
+    "success_login",
+    "auth_success",
+    "login_success",
+    "successful_login",
+    "logon_success",
+    "successful_logon",
+    "login_succeeded",
 }
 
 
-LOGIN_FAILED_VARIANTS = {
-    "LOGIN_FAILED",
-    "MFA_FAILED",
-    "LOGON_FAILURE",
-    "AUTH_FAILED",
-    "FAILED_LOGIN",
-    "INVALID_CREDENTIALS",
-    "FAILED_LOGON",
+FAILURE_EVENTS = {
+    "login_failed",
+    "mfa_failed",
+    "logon_failure",
+    "auth_failed",
+    "failed_login",
+    "invalid_credentials",
+    "failed_logon",
+    "authentication_failed",
 }
 
 
-OTHER_EVENT_VARIANTS = {
-    "PASSWORD_RESET",
-    "ACCOUNT_LOCK",
-    "ACCOUNT_UNLOCK",
-    "DEVICE_REGISTERED",
-    "PRIVILEGE_ESCALATION_REQUEST",
-    "SESSION_TERMINATED",
-    "MFA_ENROLLMENT",
-}
-
-
-def normalize_event_key(value):
+def normalize_event_type(value):
     """
-    Normalize event type text.
-
-    Examples:
-        Successful Login -> SUCCESSFUL_LOGIN
-        failed logon     -> FAILED_LOGON
-        Login Failed     -> LOGIN_FAILED
-    """
-
-    if is_missing(value):
-        return None
-
-    text = str(value).strip().upper()
-
-    if text == "":
-        return None
-
-    # Convert spaces and hyphens to underscores
-    text = re.sub(r"[\s\-]+", "_", text)
-
-    return text
-
-
-def clean_event_type(value):
-    """
-    Normalize primary event type into:
+    Reduce IAM event types to:
 
         login_success
         login_failed
         other
     """
 
-    key = normalize_event_key(value)
+    value = normalize_text(value)
 
-    if key is None:
-        return pd.NA
-
-    if key in LOGIN_SUCCESS_VARIANTS:
-        return "login_success"
-
-    if key in LOGIN_FAILED_VARIANTS:
-        return "login_failed"
-
-    if key in OTHER_EVENT_VARIANTS:
+    if pd.isna(value):
         return "other"
 
-    # Unknown values are deliberately not guessed.
-    return pd.NA
+    normalized = (
+        str(value)
+        .strip()
+        .lower()
+        .replace("-", "_")
+        .replace(" ", "_")
+    )
+
+    if normalized in SUCCESS_EVENTS:
+        return "login_success"
+
+    if normalized in FAILURE_EVENTS:
+        return "login_failed"
+
+    return "other"
 
 
-def clean_event_category(value):
-    """
-    Preserve finer-grained security event meaning.
-    """
+# ============================================================
+# AUTH METHOD
+# ============================================================
 
-    key = normalize_event_key(value)
+def normalize_auth_method(value):
+    """Standardize basic authentication-method formatting."""
 
-    if key is None:
-        return pd.NA
+    value = normalize_text(value)
 
-    category_map = {
-        # Successful authentication
-        "SSO_SUCCESS": "login_success",
-        "SUCCESS_LOGIN": "login_success",
-        "AUTH_SUCCESS": "login_success",
-        "LOGIN_SUCCESS": "login_success",
-        "SUCCESSFUL_LOGIN": "login_success",
-        "LOGON_SUCCESS": "login_success",
+    if pd.isna(value):
+        return np.nan
 
-        # Failed authentication
-        "LOGIN_FAILED": "login_failed",
-        "MFA_FAILED": "mfa_failed",
-        "LOGON_FAILURE": "login_failed",
-        "AUTH_FAILED": "login_failed",
-        "FAILED_LOGIN": "login_failed",
-        "INVALID_CREDENTIALS": "login_failed",
-        "FAILED_LOGON": "login_failed",
+    value = str(value).strip().lower()
 
-        # Other security events
-        "PASSWORD_RESET": "password_reset",
-        "ACCOUNT_LOCK": "account_lock",
-        "ACCOUNT_UNLOCK": "account_unlock",
-        "DEVICE_REGISTERED": "device_registered",
-        "PRIVILEGE_ESCALATION_REQUEST": "privilege_escalation_request",
-        "SESSION_TERMINATED": "session_terminated",
-        "MFA_ENROLLMENT": "mfa_enrollment",
+    auth_map = {
+        "password": "Password",
+        "pwd": "Password",
+        "password_auth": "Password",
+
+        "sso": "SSO",
+        "sso_auth": "SSO",
+
+        "mfa": "MFA",
+        "multi_factor": "MFA",
+        "multi-factor": "MFA",
+
+        "oauth": "OAuth",
+        "oauth2": "OAuth",
+
+        "certificate": "Certificate",
+        "cert": "Certificate",
+
+        "biometric": "Biometric",
     }
 
-    return category_map.get(key, pd.NA)
-
-
-def event_type_status(raw_value, clean_value):
-    """Describe event type cleaning outcome."""
-
-    if is_missing(raw_value):
-        return "missing"
-
-    if is_missing(clean_value):
-        return "unmapped"
-
-    return "mapped"
+    return auth_map.get(
+        value,
+        str(value).strip(),
+    )
 
 
 # ============================================================
-# MFA CLEANING
+# BOOLEAN / MFA
 # ============================================================
 
-MFA_TRUE_VALUES = {
-    "TRUE",
-    "Y",
-    "YES",
-    "1",
-}
+def normalize_boolean(value):
+    """Normalize common boolean representations."""
 
-MFA_FALSE_VALUES = {
-    "FALSE",
-    "N",
-    "NO",
-    "0",
-}
+    value = normalize_text(value)
 
+    if pd.isna(value):
+        return np.nan
 
-def clean_mfa(value):
-    """Normalize MFA values into nullable Boolean."""
+    value = str(value).strip().lower()
 
-    if is_missing(value):
-        return pd.NA
+    true_values = {
+        "true",
+        "t",
+        "yes",
+        "y",
+        "1",
+        "passed",
+    }
 
-    text = str(value).strip().upper()
+    false_values = {
+        "false",
+        "f",
+        "no",
+        "n",
+        "0",
+        "failed",
+    }
 
-    if text in MFA_TRUE_VALUES:
+    if value in true_values:
         return True
 
-    if text in MFA_FALSE_VALUES:
+    if value in false_values:
         return False
 
-    return pd.NA
-
-
-def validate_mfa(raw_value, clean_value):
-    """Validate MFA cleaning result."""
-
-    if is_missing(raw_value):
-        return pd.NA
-
-    return not is_missing(clean_value)
+    return np.nan
 
 
 # ============================================================
-# TIMESTAMP CLEANING
+# IP VALIDATION
 # ============================================================
 
-def clean_timestamp(series):
+def normalize_ip(value):
     """
-    Parse mixed timestamp formats.
+    Validate IPv4 and IPv6 addresses.
 
-    Invalid timestamps are converted to NULL in the clean
-    analytical column while the original raw value is preserved.
-    """
-
-    return pd.to_datetime(
-        series,
-        format="mixed",
-        errors="coerce",
-        utc=True,
-    )
-
-
-def timestamp_validity(raw_series, clean_series):
-    """
-    Nullable validation:
-
-        missing raw value -> <NA>
-        valid timestamp   -> True
-        invalid timestamp -> False
+    Invalid addresses become NaN and are later represented
+    as Unknown.
     """
 
-    result = pd.Series(
-        pd.NA,
-        index=raw_series.index,
-        dtype="boolean",
-    )
+    value = normalize_text(value)
 
-    non_missing_mask = ~raw_series.isna()
+    if pd.isna(value):
+        return np.nan
 
-    result.loc[non_missing_mask] = (
-        clean_series.loc[non_missing_mask].notna()
-    )
-
-    return result
-
-
-# ============================================================
-# SOURCE IP CLEANING
-# ============================================================
-
-def clean_ip(value):
-    """
-    Validate and canonicalize IPv4/IPv6 addresses.
-
-    Invalid non-empty IP values become NULL in the clean
-    analytical field. Raw values are preserved separately.
-    """
-
-    if is_missing(value):
-        return pd.NA
-
-    text = str(value).strip()
-
-    if text == "":
-        return pd.NA
+    value = str(value).strip()
 
     try:
-        return str(ipaddress.ip_address(text))
+        ipaddress.ip_address(value)
+        return value
     except ValueError:
-        return pd.NA
-
-
-def ip_validity(raw_series, clean_series):
-    """
-    Nullable IP validation.
-    """
-
-    result = pd.Series(
-        pd.NA,
-        index=raw_series.index,
-        dtype="boolean",
-    )
-
-    non_missing_mask = ~raw_series.isna()
-
-    result.loc[non_missing_mask] = (
-        clean_series.loc[non_missing_mask].notna()
-    )
-
-    return result
+        return np.nan
 
 
 # ============================================================
-# RISK SCORE CLEANING
+# RISK SCORE
 # ============================================================
 
-def clean_risk_score(value):
+def normalize_risk_score(value):
     """
-    Clean and classify risk score.
+    Convert risk score to numeric 0–100.
 
-    Returns:
-        numeric_score
-        category
-        status
-        anomaly_reason
+    Supported examples:
+        78
+        "78"
+        "78/100"
+        High
+        Medium
+        Low
 
-    Important:
-    High / Medium / Low are preserved as categories.
-    They are NOT converted to arbitrary numeric scores.
+    Values outside 0–100 are invalid.
     """
 
-    if is_missing(value):
-        return pd.NA, pd.NA, "missing", pd.NA
+    value = normalize_text(value)
 
-    text = str(value).strip()
+    if pd.isna(value):
+        return np.nan
 
-    if text == "":
-        return pd.NA, pd.NA, "missing", pd.NA
+    value = str(value).strip()
 
-    # --------------------------------------------------------
-    # Categorical risk labels
-    # --------------------------------------------------------
+    # Example: 78/100
+    match = re.fullmatch(
+        r"(\d+(?:\.\d+)?)\s*/\s*100",
+        value,
+    )
 
-    category_map = {
-        "HIGH": "High",
-        "MEDIUM": "Medium",
-        "LOW": "Low",
-    }
+    if match:
+        score = float(match.group(1))
 
-    upper_text = text.upper()
-
-    if upper_text in category_map:
-        return (
-            pd.NA,
-            category_map[upper_text],
-            "valid_categorical",
-            pd.NA,
+    else:
+        numeric = pd.to_numeric(
+            value,
+            errors="coerce",
         )
 
-    # --------------------------------------------------------
-    # Fraction format such as 78/100
-    # --------------------------------------------------------
+        if not pd.isna(numeric):
+            score = float(numeric)
 
-    fraction_match = re.fullmatch(
-        r"\s*(-?\d+(?:\.\d+)?)\s*/\s*100\s*",
-        text,
-    )
+        else:
+            category_map = {
+                "high": 80.0,
+                "medium": 50.0,
+                "low": 20.0,
+            }
 
-    if fraction_match:
-
-        score = float(fraction_match.group(1))
-
-        if 0 <= score <= 100:
-            return (
-                score,
-                pd.NA,
-                "valid_numeric_fraction",
-                pd.NA,
+            score = category_map.get(
+                value.lower(),
+                np.nan,
             )
 
-        return (
-            pd.NA,
-            pd.NA,
-            "invalid_range",
-            "outside_0_100",
-        )
+    if pd.isna(score):
+        return np.nan
 
-    # --------------------------------------------------------
-    # Direct numeric value
-    # --------------------------------------------------------
+    if score < 0 or score > 100:
+        return np.nan
 
-    numeric = pd.to_numeric(text, errors="coerce")
+    return score
 
-    if pd.notna(numeric):
 
-        if 0 <= float(numeric) <= 100:
-            return (
-                float(numeric),
-                pd.NA,
-                "valid_numeric",
-                pd.NA,
-            )
+# ============================================================
+# FAILURE REASON
+# ============================================================
 
-        return (
-            pd.NA,
-            pd.NA,
-            "invalid_range",
-            "outside_0_100",
-        )
+FAILURE_REASON_MAP = {
+    "invalid credentials": "invalid credentials",
+    "invalid_credentials": "invalid credentials",
 
-    # --------------------------------------------------------
-    # Unknown non-numeric value
-    # --------------------------------------------------------
+    "timeout": "timeout",
 
-    return (
-        pd.NA,
-        pd.NA,
-        "invalid_format",
-        "unrecognized_risk_value",
+    "unknown user": "unknown user",
+    "unknown_user": "unknown user",
+
+    "bad token": "bad token",
+    "bad_token": "bad token",
+
+    "account locked": "account locked",
+    "account_locked": "account locked",
+
+    "wrong password": "wrong_password",
+    "wrong_password": "wrong_password",
+
+    "mfa failed": "MFA failed",
+    "mfa_failed": "MFA failed",
+
+    "otp expired": "OTP expired",
+    "otp_expired": "OTP expired",
+
+    "expired password": "expired password",
+    "expired_password": "expired password",
+}
+
+
+def normalize_failure_reason(value):
+    """Standardize known failure-reason variants."""
+
+    value = normalize_text(value)
+
+    if pd.isna(value):
+        return np.nan
+
+    key = str(value).strip().lower()
+
+    return FAILURE_REASON_MAP.get(
+        key,
+        str(value).strip(),
     )
 
 
 # ============================================================
-# MAIN PIPELINE
+# TIMESTAMP
+# ============================================================
+
+def parse_timestamp(value):
+    """
+    Parse mixed timestamp formats and 10-digit Unix epoch seconds.
+    """
+
+    value = normalize_text(value)
+
+    if pd.isna(value):
+        return pd.NaT
+
+    value = str(value).strip()
+
+    # Unix epoch seconds.
+    if re.fullmatch(r"\d{10}", value):
+        try:
+            return pd.to_datetime(
+                int(value),
+                unit="s",
+                errors="coerce",
+            )
+        except Exception:
+            return pd.NaT
+
+    # Try normal datetime parsing.
+    return pd.to_datetime(
+        value,
+        errors="coerce",
+        format="mixed",
+    )
+
+
+# ============================================================
+# LOAD JSON
+# ============================================================
+
+def load_iam_json(path):
+    """
+    Load IAM JSON robustly.
+
+    Handles:
+        1. JSON array of records
+        2. JSON object containing a list of records
+        3. JSON Lines / NDJSON
+    """
+
+    # First attempt: standard JSON.
+    try:
+        with open(
+            path,
+            "r",
+            encoding="utf-8",
+        ) as file:
+            data = json.load(file)
+
+        if isinstance(data, list):
+            return pd.DataFrame(data)
+
+        if isinstance(data, dict):
+
+            # Common wrapper keys.
+            for key in [
+                "data",
+                "records",
+                "events",
+                "logs",
+                "iam_logs",
+            ]:
+                if key in data and isinstance(
+                    data[key],
+                    list,
+                ):
+                    return pd.DataFrame(data[key])
+
+            # Single record.
+            return pd.DataFrame([data])
+
+    except json.JSONDecodeError:
+        pass
+
+    # Second attempt: JSON Lines.
+    try:
+        return pd.read_json(
+            path,
+            lines=True,
+        )
+    except Exception as exc:
+        raise ValueError(
+            f"Unable to parse IAM JSON file: {path}\n"
+            f"Error: {exc}"
+        ) from exc
+
+
+# ============================================================
+# MAIN
 # ============================================================
 
 def main():
 
-    print("=" * 60)
+    print("=" * 70)
     print("IAM DATA CLEANING PIPELINE")
-    print("=" * 60)
+    print("=" * 70)
 
     # --------------------------------------------------------
     # 1. LOAD RAW DATA
@@ -594,392 +661,602 @@ def main():
 
     print("\n[1/10] Loading raw IAM data...")
 
-    df = pd.read_json(RAW_PATH)
+    if not RAW_FILE.exists():
+        raise FileNotFoundError(
+            f"Raw IAM file not found: {RAW_FILE}"
+        )
+
+    df = load_iam_json(RAW_FILE)
 
     raw_rows = len(df)
 
-    print(f"Raw rows loaded: {raw_rows:,}")
+    print(f"Raw rows: {raw_rows:,}")
+    print(f"Raw columns: {len(df.columns)}")
 
     # --------------------------------------------------------
-    # 2. REMOVE EXACT DUPLICATES
+    # 2. STANDARDIZE COLUMN NAMES
     # --------------------------------------------------------
 
-    print("\n[2/10] Removing exact duplicate rows...")
+    print("\n[2/10] Standardizing column names...")
 
-    duplicate_mask = df.duplicated(keep="first")
-
-    exact_duplicates_removed = int(
-        duplicate_mask.sum()
+    df.columns = (
+        df.columns
+        .astype(str)
+        .str.strip()
+        .str.lower()
+        .str.replace(" ", "_", regex=False)
     )
 
-    # Remove only extra copies.
-    # The raw JSON file remains untouched.
-    df = df.loc[~duplicate_mask].copy()
+    print("Columns:")
+    print(", ".join(df.columns))
 
-    cleaned_rows = len(df)
+    # --------------------------------------------------------
+    # REQUIRED SOURCE COLUMNS
+    # --------------------------------------------------------
+
+    missing_source_columns = [
+        column
+        for column in FINAL_COLUMNS
+        if column not in df.columns
+    ]
+
+    if missing_source_columns:
+        raise ValueError(
+            "Required IAM columns are missing from raw data: "
+            f"{missing_source_columns}"
+        )
+
+    # --------------------------------------------------------
+    # 3. REMOVE EXACT DUPLICATES
+    # --------------------------------------------------------
+
+    print("\n[3/10] Removing exact duplicate rows...")
+
+    duplicate_rows = int(
+        df.duplicated().sum()
+    )
+
+    df = df.drop_duplicates().copy()
 
     print(
         f"Exact duplicate rows removed: "
-        f"{exact_duplicates_removed:,}"
+        f"{duplicate_rows:,}"
     )
 
-    print(f"Rows remaining: {cleaned_rows:,}")
-
-    # --------------------------------------------------------
-    # 3. USER ID
-    # --------------------------------------------------------
-
-    print("\n[3/10] Cleaning user IDs...")
-
-    df["user_id_raw"] = df["user_id"]
-
-    df["user_id_clean"] = (
-        df["user_id"]
-        .apply(clean_user_id)
-    )
-
-    df["user_id_valid"] = (
-        df["user_id_clean"]
-        .apply(validate_user_id)
-        .astype("boolean")
+    print(
+        f"Rows remaining: {len(df):,}"
     )
 
     # --------------------------------------------------------
-    # 4. DEPARTMENT
+    # 4. BASIC TEXT NORMALIZATION
     # --------------------------------------------------------
 
-    print("\n[4/10] Standardizing departments...")
+    print("\n[4/10] Normalizing textual fields...")
 
-    df["department_raw"] = df["department"]
+    for column in FINAL_COLUMNS:
 
-    df["department_clean"] = (
-        df["department"]
-        .apply(clean_department)
-    )
-
-    df["department_status"] = [
-        department_status(raw, clean)
-        for raw, clean in zip(
-            df["department_raw"],
-            df["department_clean"],
+        df[column] = df[column].apply(
+            normalize_text
         )
-    ]
 
     # --------------------------------------------------------
-    # 5. EVENT TYPE
+    # 5. IDENTIFIERS + CATEGORIES
     # --------------------------------------------------------
 
-    print("\n[5/10] Standardizing event types...")
-
-    df["event_type_raw"] = df["event_type"]
-
-    df["event_type_clean"] = (
-        df["event_type"]
-        .apply(clean_event_type)
+    print(
+        "\n[5/10] Standardizing identifiers "
+        "and categorical values..."
     )
 
-    df["event_category"] = (
-        df["event_type"]
-        .apply(clean_event_category)
+    df["user_id"] = df["user_id"].apply(
+        normalize_user_id
     )
 
-    df["event_type_status"] = [
-        event_type_status(raw, clean)
-        for raw, clean in zip(
-            df["event_type_raw"],
-            df["event_type_clean"],
-        )
-    ]
-
-    # --------------------------------------------------------
-    # 6. MFA
-    # --------------------------------------------------------
-
-    print("\n[6/10] Standardizing MFA values...")
-
-    df["mfa_passed_raw"] = df["mfa_passed"]
-
-    df["mfa_passed_clean"] = (
-        df["mfa_passed"]
-        .apply(clean_mfa)
-        .astype("boolean")
+    df["department"] = df["department"].apply(
+        normalize_department
     )
 
-    df["mfa_passed_valid"] = [
-        validate_mfa(raw, clean)
-        for raw, clean in zip(
-            df["mfa_passed_raw"],
-            df["mfa_passed_clean"],
-        )
-    ]
+    df["event_type"] = df["event_type"].apply(
+        normalize_event_type
+    )
 
-    df["mfa_passed_valid"] = (
-        df["mfa_passed_valid"]
-        .astype("boolean")
+    df["auth_method"] = df["auth_method"].apply(
+        normalize_auth_method
+    )
+
+    df["hostname"] = df["hostname"].apply(
+        normalize_hostname
     )
 
     # --------------------------------------------------------
-    # 7. TIMESTAMP
+    # 6. TIMESTAMP
     # --------------------------------------------------------
 
-    print("\n[7/10] Cleaning timestamps...")
+    print("\n[6/10] Parsing timestamps...")
 
-    df["timestamp_raw"] = df["timestamp"]
-
-    df["timestamp_clean"] = clean_timestamp(
-        df["timestamp"]
-    )
-
-    df["timestamp_valid"] = timestamp_validity(
-        df["timestamp_raw"],
-        df["timestamp_clean"],
-    )
-
-    # --------------------------------------------------------
-    # 8. SOURCE IP
-    # --------------------------------------------------------
-
-    print("\n[8/10] Validating source IP addresses...")
-
-    df["source_ip_raw"] = df["source_ip"]
-
-    df["source_ip_clean"] = (
-        df["source_ip"]
-        .apply(clean_ip)
-    )
-
-    df["source_ip_valid"] = ip_validity(
-        df["source_ip_raw"],
-        df["source_ip_clean"],
-    )
-
-    # --------------------------------------------------------
-    # 9. RISK SCORE
-    # --------------------------------------------------------
-
-    print("\n[9/10] Cleaning risk scores...")
-
-    risk_results = (
-        df["risk_score"]
-        .apply(clean_risk_score)
-    )
-
-    df["risk_score_raw"] = df["risk_score"]
-
-    df["risk_score_numeric"] = (
-        risk_results
-        .apply(lambda x: x[0])
-    )
-
-    df["risk_score_category"] = (
-        risk_results
-        .apply(lambda x: x[1])
-    )
-
-    df["risk_score_status"] = (
-        risk_results
-        .apply(lambda x: x[2])
-    )
-
-    df["risk_anomaly_reason"] = (
-        risk_results
-        .apply(lambda x: x[3])
-    )
-
-    # --------------------------------------------------------
-    # 10. SAVE CLEANED DATA + SUMMARY
-    # --------------------------------------------------------
-
-    print("\n[10/10] Saving cleaned data and summary...")
-
-    CLEANED_PATH.parent.mkdir(
-        parents=True,
-        exist_ok=True,
-    )
-
-    SUMMARY_PATH.parent.mkdir(
-        parents=True,
-        exist_ok=True,
-    )
-
-    # Save cleaned IAM data
-    df.to_csv(
-        CLEANED_PATH,
-        index=False,
-    )
-
-    # --------------------------------------------------------
-    # SUMMARY COUNTS
-    # --------------------------------------------------------
-
-    user_id_invalid = int(
-        (df["user_id_valid"] == False).sum()
-    )
-
-    department_unmapped = int(
-        (df["department_status"] == "unmapped").sum()
-    )
-
-    event_unmapped = int(
-        (df["event_type_status"] == "unmapped").sum()
-    )
-
-    mfa_invalid = int(
-        (df["mfa_passed_valid"] == False).sum()
+    parsed_timestamp = df["timestamp"].apply(
+        parse_timestamp
     )
 
     timestamp_invalid = int(
-        (df["timestamp_valid"] == False).sum()
+        parsed_timestamp.isna().sum()
     )
 
-    source_ip_invalid = int(
-        (df["source_ip_valid"] == False).sum()
+    df["timestamp"] = (
+        parsed_timestamp
+        .dt.strftime("%Y-%m-%d %H:%M:%S")
     )
 
-    risk_invalid_range = int(
-        (df["risk_score_status"] == "invalid_range").sum()
-    )
-
-    risk_invalid_format = int(
-        (df["risk_score_status"] == "invalid_format").sum()
-    )
-
-    risk_categorical = int(
-        (df["risk_score_status"] == "valid_categorical").sum()
-    )
-
-    risk_missing = int(
-        (df["risk_score_status"] == "missing").sum()
-    )
-
-    # --------------------------------------------------------
-    # CREATE SUMMARY REPORT
-    # --------------------------------------------------------
-
-    summary = pd.DataFrame([
+    df["timestamp"] = df["timestamp"].replace(
         {
-            "dataset": "IAM",
-            "raw_rows": raw_rows,
-            "exact_duplicate_rows_removed":
-                exact_duplicates_removed,
-            "cleaned_rows": cleaned_rows,
-
-            "user_id_invalid":
-                user_id_invalid,
-
-            "department_unmapped":
-                department_unmapped,
-
-            "event_type_unmapped":
-                event_unmapped,
-
-            "mfa_invalid":
-                mfa_invalid,
-
-            "timestamp_invalid":
-                timestamp_invalid,
-
-            "source_ip_invalid":
-                source_ip_invalid,
-
-            "risk_invalid_range":
-                risk_invalid_range,
-
-            "risk_invalid_format":
-                risk_invalid_format,
-
-            "risk_categorical":
-                risk_categorical,
-
-            "risk_missing":
-                risk_missing,
-
-            "output_file":
-                str(CLEANED_PATH),
+            "NaT": np.nan,
+            "": np.nan,
         }
-    ])
+    )
 
-    summary.to_csv(
-        SUMMARY_PATH,
+    print(
+        f"Missing/invalid timestamps: "
+        f"{timestamp_invalid:,}"
+    )
+
+    # --------------------------------------------------------
+    # 7. IP VALIDATION
+    # --------------------------------------------------------
+
+    print("\n[7/10] Validating source IP addresses...")
+
+    df["source_ip"] = df["source_ip"].apply(
+        normalize_ip
+    )
+
+    invalid_ip_count = int(
+        df["source_ip"].isna().sum()
+    )
+
+    print(
+        f"Missing/invalid source IP values: "
+        f"{invalid_ip_count:,}"
+    )
+
+    # --------------------------------------------------------
+    # 8. MFA + RISK SCORE
+    # --------------------------------------------------------
+
+    print(
+        "\n[8/10] Standardizing MFA "
+        "and risk scores..."
+    )
+
+    df["mfa_passed"] = df["mfa_passed"].apply(
+        normalize_boolean
+    )
+
+    df["risk_score"] = df["risk_score"].apply(
+        normalize_risk_score
+    )
+
+    valid_risk_scores = (
+        df["risk_score"]
+        .dropna()
+    )
+
+    if len(valid_risk_scores) > 0:
+        risk_median = float(
+            valid_risk_scores.median()
+        )
+    else:
+        risk_median = 50.0
+
+    df["risk_score"] = (
+        df["risk_score"]
+        .fillna(risk_median)
+    )
+
+    print(
+        f"Risk score median used: "
+        f"{risk_median:.2f}"
+    )
+
+    # --------------------------------------------------------
+    # 9. FAILURE REASON
+    # --------------------------------------------------------
+
+    print(
+        "\n[9/10] Applying failure-reason semantics..."
+    )
+
+    df["failure_reason"] = (
+        df["failure_reason"]
+        .apply(normalize_failure_reason)
+    )
+
+    missing_failure_reason = (
+        df["failure_reason"].isna()
+        |
+        df["failure_reason"]
+        .astype("string")
+        .str.strip()
+        .eq("")
+        |
+        df["failure_reason"]
+        .astype("string")
+        .str.upper()
+        .isin(
+            {
+                "NA",
+                "N/A",
+                "NONE",
+                "NULL",
+                "NAN",
+            }
+        )
+    )
+
+    # login_success / other:
+    # failure reason is not applicable.
+    non_failure_events = df[
+        "event_type"
+    ].isin(
+        {
+            "login_success",
+            "other",
+        }
+    )
+
+    df.loc[
+        non_failure_events
+        & missing_failure_reason,
+        "failure_reason",
+    ] = "Not Applicable"
+
+    # login_failed:
+    # missing reason means reason was not available.
+    login_failure_events = df[
+        "event_type"
+    ].eq("login_failed")
+
+    df.loc[
+        login_failure_events
+        & missing_failure_reason,
+        "failure_reason",
+    ] = "Unknown"
+
+    # --------------------------------------------------------
+    # 10. ZERO-MISSING FINALIZATION
+    # --------------------------------------------------------
+
+    print(
+        "\n[10/10] Finalizing "
+        "zero-missing analytical dataset..."
+    )
+
+    # --------------------------------------------------------
+    # Semantic Unknown values
+    # --------------------------------------------------------
+
+    unknown_columns = [
+        "event_id",
+        "user_id",
+        "username",
+        "department",
+        "auth_method",
+        "source_ip",
+        "hostname",
+        "device_id",
+        "session_id",
+        "geo_location",
+    ]
+
+    for column in unknown_columns:
+
+        df[column] = (
+            df[column]
+            .replace(
+                {
+                    "": np.nan,
+                    "NA": np.nan,
+                    "N/A": np.nan,
+                    "NONE": np.nan,
+                    "NULL": np.nan,
+                }
+            )
+            .fillna("Unknown")
+        )
+
+    # Timestamp.
+    df["timestamp"] = (
+        df["timestamp"]
+        .replace(
+            {
+                "": np.nan,
+                "NA": np.nan,
+                "N/A": np.nan,
+                "NONE": np.nan,
+                "NULL": np.nan,
+            }
+        )
+        .fillna("Unknown")
+    )
+
+    # MFA.
+    df["mfa_passed"] = (
+        df["mfa_passed"]
+        .map(
+            {
+                True: "True",
+                False: "False",
+            }
+        )
+        .fillna("Unknown")
+    )
+
+    # Failure reason.
+    df["failure_reason"] = (
+        df["failure_reason"]
+        .replace(
+            {
+                "": np.nan,
+                "NA": np.nan,
+                "N/A": np.nan,
+                "NONE": np.nan,
+                "NULL": np.nan,
+            }
+        )
+        .fillna("Unknown")
+    )
+
+    # Risk score.
+    df["risk_score"] = (
+        pd.to_numeric(
+            df["risk_score"],
+            errors="coerce",
+        )
+        .fillna(risk_median)
+        .clip(
+            lower=0,
+            upper=100,
+        )
+    )
+
+    # --------------------------------------------------------
+    # FINAL COLUMN ORDER
+    # --------------------------------------------------------
+
+    df = df[FINAL_COLUMNS].copy()
+
+    # --------------------------------------------------------
+    # FINAL QUALITY CHECKS
+    # --------------------------------------------------------
+
+    print("\n" + "=" * 70)
+    print("FINAL QUALITY CHECKS")
+    print("=" * 70)
+
+    missing_cells = int(
+        df.isna().sum().sum()
+    )
+
+    duplicate_rows_final = int(
+        df.duplicated().sum()
+    )
+
+    duplicate_event_ids = int(
+        df["event_id"].duplicated().sum()
+    )
+
+    invalid_risk_scores = int(
+        (
+            (df["risk_score"] < 0)
+            |
+            (df["risk_score"] > 100)
+        ).sum()
+    )
+
+    invalid_event_types = int(
+        (
+            ~df["event_type"].isin(
+                {
+                    "login_success",
+                    "login_failed",
+                    "other",
+                }
+            )
+        ).sum()
+    )
+
+    invalid_mfa = int(
+        (
+            ~df["mfa_passed"].isin(
+                {
+                    "True",
+                    "False",
+                    "Unknown",
+                }
+            )
+        ).sum()
+    )
+
+    invalid_failure_reason_semantics = int(
+        (
+            df["event_type"].isin(
+                {
+                    "login_success",
+                    "other",
+                }
+            )
+            &
+            ~df["failure_reason"].isin(
+                {
+                    "Not Applicable",
+                    "Unknown",
+                }
+            )
+        ).sum()
+    )
+
+    login_failure_unknown = int(
+        (
+            df["event_type"].eq(
+                "login_failed"
+            )
+            &
+            df["failure_reason"].eq(
+                "Unknown"
+            )
+        ).sum()
+    )
+
+    print(
+        f"Final rows: "
+        f"{len(df):,}"
+    )
+
+    print(
+        f"Final columns: "
+        f"{len(df.columns)}"
+    )
+
+    print(
+        f"Final missing cells: "
+        f"{missing_cells:,}"
+    )
+
+    print(
+        f"Final duplicate rows: "
+        f"{duplicate_rows_final:,}"
+    )
+
+    print(
+        f"Duplicate event IDs: "
+        f"{duplicate_event_ids:,}"
+    )
+
+    print(
+        f"Invalid risk scores: "
+        f"{invalid_risk_scores:,}"
+    )
+
+    print(
+        f"Invalid event types: "
+        f"{invalid_event_types:,}"
+    )
+
+    print(
+        f"Invalid MFA values: "
+        f"{invalid_mfa:,}"
+    )
+
+    print(
+        "Invalid non-failure event reasons: "
+        f"{invalid_failure_reason_semantics:,}"
+    )
+
+    print(
+        "Login failures marked Unknown: "
+        f"{login_failure_unknown:,}"
+    )
+
+    # --------------------------------------------------------
+    # FAIL HARD
+    # --------------------------------------------------------
+
+    if missing_cells != 0:
+        raise ValueError(
+            f"Final IAM dataset still contains "
+            f"{missing_cells} missing cells."
+        )
+
+    if duplicate_rows_final != 0:
+        raise ValueError(
+            "Final IAM dataset contains duplicate rows."
+        )
+
+    if duplicate_event_ids != 0:
+        raise ValueError(
+            "Final IAM dataset contains duplicate event IDs."
+        )
+
+    if invalid_risk_scores != 0:
+        raise ValueError(
+            "Final IAM dataset contains invalid risk scores."
+        )
+
+    if invalid_event_types != 0:
+        raise ValueError(
+            "Final IAM dataset contains invalid event types."
+        )
+
+    if invalid_mfa != 0:
+        raise ValueError(
+            "Final IAM dataset contains invalid MFA values."
+        )
+
+    if invalid_failure_reason_semantics != 0:
+        raise ValueError(
+            "Failure reason semantics are inconsistent."
+        )
+
+    # --------------------------------------------------------
+    # SAVE OUTPUT
+    # --------------------------------------------------------
+
+    OUTPUT_FILE.parent.mkdir(
+        parents=True,
+        exist_ok=True,
+    )
+
+    df.to_csv(
+        OUTPUT_FILE,
         index=False,
     )
 
     # --------------------------------------------------------
-    # TERMINAL REPORT
+    # FINAL REPORT
     # --------------------------------------------------------
 
-    print("\n" + "=" * 60)
+    print("\n" + "=" * 70)
     print("IAM CLEANING COMPLETE")
-    print("=" * 60)
+    print("=" * 70)
 
     print(
-        f"Raw rows                 : "
+        f"Input:  {RAW_FILE}"
+    )
+
+    print(
+        f"Output: {OUTPUT_FILE}"
+    )
+
+    print(
+        f"Raw rows: "
         f"{raw_rows:,}"
     )
 
     print(
-        f"Exact duplicates removed : "
-        f"{exact_duplicates_removed:,}"
+        f"Exact duplicates removed: "
+        f"{duplicate_rows:,}"
     )
 
     print(
-        f"Cleaned rows             : "
-        f"{cleaned_rows:,}"
+        f"Final rows: "
+        f"{len(df):,}"
     )
 
     print(
-        f"User ID invalid          : "
-        f"{user_id_invalid:,}"
+        f"Final columns: "
+        f"{len(df.columns)}"
     )
 
     print(
-        f"Department unmapped      : "
-        f"{department_unmapped:,}"
+        f"Final missing cells: "
+        f"{missing_cells}"
     )
 
     print(
-        f"Event type unmapped      : "
-        f"{event_unmapped:,}"
+        f"Final duplicate rows: "
+        f"{duplicate_rows_final}"
     )
 
-    print(
-        f"MFA invalid              : "
-        f"{mfa_invalid:,}"
-    )
-
-    print(
-        f"Timestamp invalid        : "
-        f"{timestamp_invalid:,}"
-    )
-
-    print(
-        f"Source IP invalid        : "
-        f"{source_ip_invalid:,}"
-    )
-
-    print(
-        f"Risk invalid range       : "
-        f"{risk_invalid_range:,}"
-    )
-
-    print(
-        f"Risk invalid format      : "
-        f"{risk_invalid_format:,}"
-    )
-
-    print(
-        f"Risk categorical         : "
-        f"{risk_categorical:,}"
-    )
-
-    print(
-        f"Risk missing             : "
-        f"{risk_missing:,}"
-    )
-
-    print("\nGenerated:")
-    print(f"  {CLEANED_PATH}")
-    print(f"  {SUMMARY_PATH}")
+    print("\nRESULT: IAM CLEANING PASSED")
 
 
 if __name__ == "__main__":

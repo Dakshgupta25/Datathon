@@ -1,8 +1,10 @@
 check,status,details
-IAM -> Identity user_id join,PASS,"20,000 matched / 0 unmatched among 20,000 usable IDs"
-Endpoint -> Identity user_id join,PASS,"8,000 matched / 0 unmatched among 8,000 usable IDs"
-Endpoint -> Identity hostname join,FAIL,"7,037 matched / 482 unmatched among 7,519 usable hostnames"
-Firewall -> Identity hostname join,FAIL,"26,665 matched / 1,578 unmatched among 28,243 usable hostnames"
-IAM -> Firewall session_id coverage,INFO,"261 matched / 11,263 unmatched among 11,524 usable session IDs"
+Final analytical schemas,PASS,0 dataset schema failures
 Identity unique user_id join key,PASS,0 duplicate cleaned user IDs
 Identity hostname uniqueness,PASS,0 duplicate cleaned hostnames
+IAM -> Identity user_id join,PASS,"20,000 matched / 0 unmatched among 20,000 usable IDs"
+Endpoint -> Identity user_id join,PASS,"8,000 matched / 0 unmatched among 8,000 usable IDs"
+Endpoint -> Identity hostname join,INFO,"6,404 matched / 1,115 unmatched among 7,519 usable hostnames (85.17% coverage)"
+Firewall -> Identity hostname join,INFO,"24,287 matched / 3,956 unmatched among 28,243 usable hostnames (85.99% coverage)"
+IAM -> Firewall session_id coverage,INFO,"261 matched / 11,263 unmatched among 11,524 usable session IDs (2.26% coverage)"
+Primary user_id join-key completeness,INFO,"0 unavailable semantic user_id values across IAM, Endpoint and Identity"

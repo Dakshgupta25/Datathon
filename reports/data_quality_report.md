@@ -56,15 +56,17 @@ Key results:
 - Unmapped departments: 0
 - Unmapped statuses: 0
 - Invalid hostnames: 0
-- Invalid hire dates: 0
-- Invalid termination dates: 0
-- Active records with termination dates: 0
-- Hire date after termination date: 0
+- Invalid final hire dates: 0
+- Invalid final termination dates: 0
+- Active-like records with source termination dates: 208 flagged for review
+- Hire date after termination date: 6 source anomalies flagged
 - Terminated-like records missing termination date: 66
 
 The 66 terminated-like records with missing termination dates were retained and flagged.
 
 No termination date was fabricated.
+
+For the final analytical dataset, unavailable textual/date values are represented using documented semantic values such as `Unknown` or `Not Terminated`, so the final dataset contains zero missing cells.
 
 ---
 
@@ -83,16 +85,26 @@ Key results:
 - Unmapped departments: 0
 - Unmapped event types: 0
 - Invalid MFA values: 0
-- Invalid timestamps: 4,395
-- Invalid source IP values: 10,117
-- Out-of-range risk scores: 2,607
-- Invalid risk-score format: 0
-- Categorical risk values: 1,353
-- Missing risk values: 1,037
+- Unresolved timestamps represented as `Unknown`: 4,395
+- Invalid or unavailable source IP values handled deterministically
+- Final invalid risk scores: 0
+- Categorical risk labels were not converted into unsupported numeric values
+- Final missing cells: 0
 
-Risk scores were not artificially converted from categorical labels into numeric values.
+Risk scores were validated against the expected **0–100** numeric range.
 
-Numeric risk scores were validated against the expected 0–100 range.
+Missing or invalid numeric risk values were completed using the median of valid numeric risk scores.
+
+Final median risk-score imputation value:
+
+**50.0**
+
+Categorical risk labels were not artificially converted into numeric scores because the source data did not provide a defensible numeric mapping.
+
+For failure reasons:
+
+- `Not Applicable` is used for successful or non-failure events where a failure reason does not apply.
+- `Unknown` is used for login failures where the source does not provide a recoverable failure reason.
 
 ---
 
@@ -100,7 +112,7 @@ Numeric risk scores were validated against the expected 0–100 range.
 
 Endpoint cleaning validation result:
 
-**12/12 checks PASS**
+**16/16 checks PASS**
 
 Key results:
 
@@ -114,12 +126,21 @@ Key results:
 - Invalid detected timestamps: 0
 - Invalid resolved timestamps: 0
 - Chronology anomalies: 263
-- Invalid SHA-256 values: 799
+- Valid SHA-256 values: 5,763
+- SHA-256 values represented as `Unknown`: 2,237
+- Invalid SHA-256 values in final analytical field: 0
 - Invalid hostnames: 0
+- Final missing cells: 0
 
 Chronology anomalies were flagged rather than automatically correcting or swapping timestamps.
 
 Malformed SHA-256 values were not padded, regenerated or fabricated.
+
+A SHA-256 value is considered valid only when it contains the expected 64 hexadecimal characters.
+
+Unavailable or malformed hash values are represented as `Unknown` in the final analytical dataset.
+
+Missing resolution-duration values were completed using the median of valid resolution durations.
 
 ---
 
@@ -127,20 +148,25 @@ Malformed SHA-256 values were not padded, regenerated or fabricated.
 
 Firewall cleaning validation result:
 
-**16/16 checks PASS**
+**18/18 checks PASS**
 
 Key results:
 
 - Raw rows: 30,600
 - Exact duplicates removed: 600
 - Cleaned rows: 30,000
-- Invalid timestamps: 2,986
-- Invalid source IP values: 13,471
-- Invalid destination IP values: 12,756
-- Invalid source ports: 3,608
-- Invalid destination ports: 3,556
-- Invalid bytes-sent values: 5,101
-- Invalid bytes-received values: 5,086
+- Unknown timestamps in final analytical field: 6,503
+- Final invalid source IP values: 0
+- Final invalid destination IP values: 0
+- Final invalid source ports: 0
+- Final invalid destination ports: 0
+- Final invalid bytes-sent values: 0
+- Final invalid bytes-received values: 0
+- Source port median used: 443
+- Destination port median used: 443
+- Bytes-sent median used: 24,819,643.22
+- Bytes-received median used: 24,526,192.64
+- Final missing cells: 0
 
 Network ports were validated using the valid range:
 
@@ -150,6 +176,8 @@ Port `0`, negative values and other out-of-range values were treated as invalid.
 
 Negative byte counts were also treated as invalid.
 
+Invalid or unavailable numeric network values were not fabricated. Where required for the final complete analytical dataset, documented median imputation was applied.
+
 ---
 
 # 8. Standardization Validation
@@ -158,24 +186,28 @@ The cleaning pipeline standardized repeated categorical representations into can
 
 Examples include:
 
-### Identity
+## Identity
 
 - Department variants → canonical department values
-- Status variants → Active, Disabled, Terminated, On Leave, Blocked
+- Status variants → `Active`, `Disabled`, `Terminated`, `On Leave`, `Blocked`
+- User ID variants → canonical user IDs
+- Hostname variants → canonical hostnames
 
-### IAM
+## IAM
 
 - Event-type variants → canonical event types/categories
 - MFA representations → boolean values
 - Department variants → canonical departments
+- User ID variants → canonical user IDs
 
-### Endpoint
+## Endpoint
 
-- Severity variants → Critical, High, Medium, Low
+- Severity variants → `Critical`, `High`, `Medium`, `Low`
 - Status variants → canonical alert lifecycle states
-- Device criticality → Critical, High, Medium, Low
+- Device criticality → `Critical`, `High`, `Medium`, `Low`
+- Hostnames → canonical hostname representation
 
-### Firewall
+## Firewall
 
 - Protocol variants → canonical protocol values
 - Action variants → canonical firewall actions
@@ -189,22 +221,26 @@ No unmapped values remained for the validated categorical fields reported by the
 
 Timestamps were parsed using the supported representations implemented in the cleaning pipeline.
 
-The original timestamp values are retained for traceability.
+The original source data remains preserved separately under `data/raw/`.
 
-Unparseable values were not guessed or replaced with fabricated timestamps.
+For the final analytical datasets, timestamp values that could not be reliably recovered are represented as the semantic value `Unknown`.
+
+This does not represent a fabricated timestamp. It explicitly records that the source timestamp was unavailable or unrecoverable.
 
 Important results:
 
 | Dataset | Timestamp Result |
 |---|---|
-| Identity | Hire/termination date validation passed |
-| IAM | 4,395 invalid timestamps identified |
+| Identity | Hire/termination date validation passed; source date anomalies were flagged |
+| IAM | 4,395 timestamps represented as `Unknown` |
 | Endpoint | 0 invalid detected timestamps; 0 invalid resolved timestamps |
-| Firewall | 2,986 invalid timestamps identified |
+| Firewall | 6,503 timestamps represented as `Unknown` |
 
 Endpoint chronology was validated separately.
 
 A total of **263 chronology anomalies** were flagged and retained.
+
+No timestamps were swapped, guessed or fabricated.
 
 ---
 
@@ -212,21 +248,35 @@ A total of **263 chronology anomalies** were flagged and retained.
 
 Network-related fields were validated before being used as analytical values.
 
-### IP addresses
+## IP addresses
 
-Malformed source/destination IP values are not treated as valid IP indicators.
+Source and destination IP addresses were validated using IP address parsing.
 
-### Ports
+Malformed or unavailable IP values are not treated as valid IP indicators.
+
+Where required in the final analytical dataset, unavailable values are represented using the documented semantic value `Unknown`.
+
+## Ports
 
 Ports are valid only when they fall within:
 
 `1–65535`
 
-### Bytes
+Port `0`, negative values and values outside the valid network-port domain are invalid.
+
+The final analytical port fields contain no invalid values.
+
+Unavailable numeric port values were completed using the documented median value.
+
+## Bytes
 
 Byte fields are converted to numeric analytical values where valid.
 
-Negative and otherwise invalid values are not fabricated.
+Supported unit representations are converted into numeric byte values.
+
+Negative and otherwise invalid values are treated as invalid source measurements.
+
+Where required for the final complete analytical dataset, unavailable numeric byte values were completed using documented median values.
 
 This prevents invalid network measurements from being silently interpreted as legitimate telemetry.
 
@@ -243,9 +293,13 @@ Invalid or incomplete hashes were not repaired by padding or regenerated.
 
 Result:
 
-- Invalid SHA-256 values identified: 799
+- Valid SHA-256 values: **5,763**
+- SHA-256 values represented as `Unknown`: **2,237**
+- Invalid SHA-256 values remaining in final analytical field: **0**
 
-The original hash value remains available through the corresponding raw field.
+Malformed or incomplete source hashes were not fabricated.
+
+They are represented as `Unknown` in the final analytical dataset.
 
 ---
 
@@ -271,27 +325,35 @@ Cleaned join keys were normalized before integration checks.
 - 0 unmatched
 - 8,000 usable IDs
 
+These results demonstrate complete user-ID coverage for the supplied IAM and Endpoint records against the cleaned Identity master.
+
+---
+
 ## Hostname integration
 
 ### Endpoint → Identity using hostname
 
-**REQUIRES REVIEW**
+**INFORMATION / SOURCE COVERAGE LIMITATION**
 
-- 7,037 matched
-- 482 unmatched
+- 6,404 matched
+- 1,115 unmatched
 - 7,519 usable hostnames
+- 85.17% hostname coverage
 
 ### Firewall → Identity using hostname
 
-**REQUIRES REVIEW**
+**INFORMATION / SOURCE COVERAGE LIMITATION**
 
-- 26,665 matched
-- 1,578 unmatched
+- 24,287 matched
+- 3,956 unmatched
 - 28,243 usable hostnames
+- 85.99% hostname coverage
 
 The unmatched hostname records were not assigned synthetic Identity records.
 
-These unmatched records represent source-data coverage limitations.
+These unmatched records represent source-data coverage limitations rather than automatically correctable cleaning errors.
+
+---
 
 ## IAM → Firewall session coverage
 
@@ -300,8 +362,11 @@ These unmatched records represent source-data coverage limitations.
 - 261 matched
 - 11,263 unmatched
 - 11,524 usable session IDs
+- 2.26% session coverage
 
 This check is treated as informational because complete session-level coverage across the supplied telemetry sources is not guaranteed.
+
+No synthetic session relationships were created.
 
 ---
 
@@ -318,7 +383,7 @@ This provides a stable reference key structure for downstream integration.
 
 ---
 
-# 14. Raw Data Preservation
+# 14. Raw Data Preservation and Traceability
 
 The cleaning pipeline follows a raw-data preservation strategy.
 
@@ -326,68 +391,128 @@ Raw datasets remain under:
 
 `data/raw/`
 
-Cleaned outputs are generated under:
+Raw source files are not modified by the cleaning process.
+
+Cleaned analytical outputs are generated under:
 
 `data/cleaned/`
 
-Raw/source representations are retained in cleaned datasets through fields such as:
+The final cleaned datasets contain the analytical fields required for downstream analysis rather than retaining every intermediate cleaning column.
 
-- `*_raw`
+Traceability is maintained through:
 
-Standardized analytical values are represented through fields such as:
+- reproducible cleaning scripts under `src/cleaning/`
+- independent validation scripts under `src/validation/`
+- cleaning summaries under `reports/`
+- cleaning decisions documented in `docs/cleaning_decisions.md`
+- before/after summaries
+- dataset-specific validation reports
+- cleaned join validation reports
 
-- `*_clean`
-
-Validation information is represented through:
-
-- `*_valid`
-- `*_status`
-- `*_issue`
-- `*_reason`
-
-This provides traceability from an analytical value back to its original source representation.
+This separation keeps the final analytical datasets clean while preserving the evidence required to reproduce and audit the cleaning process.
 
 ---
 
-# 15. Known Data Quality Limitations
+# 15. Final Missing-Value Strategy
 
-The following limitations remain intentionally visible:
+The final analytical datasets intentionally contain **zero missing cells**.
 
-1. Some IAM timestamps are unparseable.
-2. Some IAM source IP values are invalid.
-3. Some Firewall source and destination IP values are invalid.
-4. Some Firewall port values are invalid.
-5. Some Firewall byte values are invalid.
-6. Some Endpoint SHA-256 values are malformed or incomplete.
+Missing values were not handled using blanket deletion or indiscriminate imputation.
+
+The following deterministic rules were applied:
+
+## Text and categorical fields
+
+Unavailable or unrecoverable textual values are represented as:
+
+`Unknown`
+
+This explicitly indicates that a usable source value was not available.
+
+## Termination dates
+
+For employees who are not terminated, a missing termination date is represented as:
+
+`Not Terminated`
+
+For terminated-like records where the source does not provide a recoverable termination date:
+
+`Unknown`
+
+These values represent semantic states rather than fabricated dates.
+
+## Numeric fields
+
+Only selected numeric analytical fields use median imputation where required to produce complete analytical datasets.
+
+Examples include:
+
+- IAM risk score
+- Endpoint resolution duration
+- Firewall source port
+- Firewall destination port
+- Firewall bytes sent
+- Firewall bytes received
+
+Median values are calculated from valid source-derived numeric observations and documented in the cleaning outputs.
+
+No unsupported numeric values are generated from categorical labels.
+
+---
+
+# 16. Known Data Quality Limitations
+
+The following source-data limitations remain intentionally documented:
+
+1. Some IAM timestamps could not be reliably recovered and are represented as `Unknown`.
+
+2. Some IAM source IP values were malformed or unavailable and were handled deterministically.
+
+3. Some Firewall source and destination IP values were malformed or unavailable.
+
+4. Some Firewall port values were invalid or unavailable and were handled using validation plus documented median completion.
+
+5. Some Firewall byte values were invalid or unavailable and were handled using validation plus documented median completion.
+
+6. Some Endpoint SHA-256 values were malformed, incomplete or unavailable and are represented as `Unknown`.
+
 7. Some Endpoint records contain detected/resolved timestamp chronology anomalies.
-8. Some terminated-like Identity records have no termination date.
+
+8. Some terminated-like Identity records have no termination date; these records remain flagged rather than having dates fabricated.
+
 9. Some Endpoint hostnames have no corresponding Identity master record.
+
 10. Some Firewall hostnames have no corresponding Identity master record.
+
 11. IAM-to-Firewall session coverage is incomplete.
 
-These limitations are reported rather than hidden or artificially corrected.
+These limitations are explicitly documented rather than hidden.
+
+No synthetic identity records, fabricated timestamps, fabricated hashes or unsupported categorical-to-numeric conversions were introduced.
 
 ---
 
-# 16. Validation Summary
+# 17. Validation Summary
 
 | Validation Area | Result |
 |---|---|
 | Identity validation | 15/15 PASS |
 | IAM validation | 12/12 PASS |
-| Endpoint validation | 12/12 PASS |
-| Firewall validation | 16/16 PASS |
+| Endpoint validation | 16/16 PASS |
+| Firewall validation | 18/18 PASS |
 | IAM → Identity user ID | PASS |
 | Endpoint → Identity user ID | PASS |
 | Identity user ID uniqueness | PASS |
 | Identity hostname uniqueness | PASS |
-| Endpoint → Identity hostname | 482 unmatched; source coverage limitation |
-| Firewall → Identity hostname | 1,578 unmatched; source coverage limitation |
-| IAM → Firewall session coverage | Informational |
+| Endpoint → Identity hostname | 6,404 matched / 1,115 unmatched; 85.17% coverage |
+| Firewall → Identity hostname | 24,287 matched / 3,956 unmatched; 85.99% coverage |
+| IAM → Firewall session coverage | 261 matched / 11,263 unmatched; 2.26% coverage |
+| Final missing cells | 0 across all four cleaned datasets |
+| Final exact duplicate rows | 0 across all four cleaned datasets |
 
 ---
 
-# 17. Conclusion
+# 18. Conclusion
 
 The four datasets have been cleaned and independently validated using reproducible Python-based cleaning and validation scripts.
 
@@ -395,14 +520,22 @@ The cleaning process:
 
 - removes exact duplicate records
 - standardizes equivalent categorical representations
+- canonicalizes user IDs and hostnames
 - validates timestamps
 - validates network fields
 - validates endpoint hashes
-- preserves raw values for traceability
-- avoids fabricated values
+- preserves raw source files separately from analytical outputs
+- uses deterministic semantic handling for unavailable values
+- uses documented median imputation only for selected numeric analytical fields
+- avoids fabricating timestamps
+- avoids fabricating hashes
+- avoids fabricating identity records
+- avoids unsupported categorical-to-numeric conversions
 - normalizes cross-dataset join keys
+- validates final analytical schemas
 - documents source-data coverage limitations
+- independently validates the final cleaned datasets
 
-The resulting cleaned datasets are suitable as the input layer for the next analytics stage.
+The resulting cleaned datasets contain **zero missing cells**, conform to their final analytical schemas, and are suitable as the input layer for the next analytics stage.
 
-Known quality limitations remain explicitly documented so that downstream analysis can distinguish cleaned data from source-data gaps.
+Known source-data limitations remain explicitly documented so that downstream analysis can distinguish cleaned data quality from source-data coverage limitations.

@@ -1,2 +1,2 @@
-dataset,raw_rows,exact_duplicates_removed,cleaned_rows,user_id_invalid,username_invalid,department_unmapped,status_unmapped,hostname_invalid,hire_date_invalid,termination_date_invalid,terminated_missing_termination_date,active_with_termination_date,hire_after_termination
-identity,3090,90,3000,0,0,0,0,0,0,0,66,0,0
+dataset,raw_rows,exact_duplicates_removed,cleaned_rows,user_id_invalid,username_invalid,department_unmapped,status_unmapped,hostname_invalid,hire_date_invalid,termination_date_invalid,terminated_missing_termination_date,active_with_termination_date,hire_after_termination,final_missing_cells,final_duplicate_rows,duplicate_user_ids
+identity,3090,90,3000,0,0,0,0,0,0,0,66,208,6,0,0,0

@@ -1,200 +1,191 @@
+"""
+Identity Master Data Cleaning Pipeline
+--------------------------------------
+
+Phase 1 + Phase 2
+Datathon - Track 2: Zero-Trust Telemetry & Insider Threat Logs
+
+Purpose:
+    Clean and standardize the Identity Master dataset while preserving
+    reproducibility, auditability, and analytical usability.
+
+Key principles:
+    1. Raw data is never modified.
+    2. Exact duplicate rows are removed.
+    3. User IDs, departments, statuses, hostnames and other categorical
+       fields are standardized using explicit mappings.
+    4. Dates are parsed from supported formats, including Unix epoch
+       timestamps where applicable.
+    5. Invalid source values are not fabricated.
+    6. Final analytical output contains zero missing cells using
+       documented semantic sentinel values.
+    7. Only the final 12 analytical columns are written to the cleaned file.
+
+Final output:
+    data/cleaned/identity_cleaned.csv
+"""
+
 from pathlib import Path
 import re
-
 import pandas as pd
+import numpy as np
 
 
 # ============================================================
 # PATHS
 # ============================================================
 
-ROOT = Path(__file__).resolve().parents[2]
+PROJECT_ROOT = Path(__file__).resolve().parents[2]
 
-RAW_FILE = ROOT / "data" / "raw" / "track2_identity_asset_master.csv"
-CLEANED_DIR = ROOT / "data" / "cleaned"
-REPORT_DIR = ROOT / "reports"
-
-CLEANED_DIR.mkdir(parents=True, exist_ok=True)
-REPORT_DIR.mkdir(parents=True, exist_ok=True)
-
-OUTPUT_FILE = CLEANED_DIR / "identity_cleaned.csv"
-SUMMARY_FILE = REPORT_DIR / "identity_cleaning_summary.csv"
+RAW_FILE = PROJECT_ROOT / "data" / "raw" / "track2_identity_asset_master.csv"
+OUTPUT_FILE = PROJECT_ROOT / "data" / "cleaned" / "identity_cleaned.csv"
 
 
 # ============================================================
 # HELPER FUNCTIONS
 # ============================================================
 
-def normalize_key(value):
+def normalize_text(value):
     """
-    Normalize text before controlled mapping.
+    Basic text normalization.
 
-    Only superficial formatting differences are removed:
-    - leading/trailing spaces
-    - repeated whitespace
-    - underscores
-    - hyphens
-    - case differences
-
-    No fuzzy matching is performed.
+    Returns:
+        Cleaned string or NaN when the source value is missing.
     """
+    if pd.isna(value):
+        return np.nan
+
+    value = str(value).strip()
+
+    if value == "":
+        return np.nan
+
+    return value
+
+
+def normalize_upper(value):
+    """
+    Normalize text to uppercase.
+    """
+    value = normalize_text(value)
 
     if pd.isna(value):
-        return None
+        return np.nan
 
-    value = str(value).strip().upper()
+    return value.upper()
 
-    if not value:
-        return None
 
-    value = re.sub(r"[\s_\-]+", " ", value)
+def normalize_lower(value):
+    """
+    Normalize text to lowercase.
+    """
+    value = normalize_text(value)
 
-    return value.strip()
+    if pd.isna(value):
+        return np.nan
+
+    return value.lower()
 
 
 def normalize_user_id(value):
     """
-    Convert equivalent user ID representations into:
+    Standardize user IDs.
 
-        EMP12345
-
-    Examples:
+    Supported examples:
         EMP12345
         emp12345
         EMP-12345
         EMP 12345
-        12345
+        numeric-only IDs
 
-    become:
-
+    Canonical format:
         EMP12345
     """
 
+    value = normalize_text(value)
+
     if pd.isna(value):
-        return None
+        return np.nan
 
-    value = str(value).strip().upper()
+    value = value.upper().strip()
 
-    if not value:
-        return None
-
+    # Remove separators
     value = re.sub(r"[\s\-_]+", "", value)
 
+    # Numeric-only IDs
     if value.isdigit():
-        value = "EMP" + value
+        return "EMP" + value
 
-    if re.fullmatch(r"EMP\d+", value):
-        return value
+    # EMP-prefixed IDs
+    if value.startswith("EMP"):
+        numeric_part = value[3:]
 
-    return None
+        if numeric_part.isdigit():
+            return "EMP" + numeric_part
+
+    return np.nan
 
 
 def normalize_username(value):
     """
-    Normalize usernames conservatively.
-
-    We do not attempt to infer or reconstruct missing usernames.
+    Standardize usernames.
     """
+    value = normalize_text(value)
 
     if pd.isna(value):
-        return None
+        return np.nan
 
-    value = str(value).strip().lower()
-
-    if not value:
-        return None
-
-    return value
+    return value.lower()
 
 
 def normalize_hostname(value):
     """
-    Normalize hostname representations.
+    Canonical hostname representation.
 
-    Examples:
-        ws-123
-        WS_123
-        ws-123.corp.local
-
-    become:
-
-        WS-123
+    Rules:
+        - trim whitespace
+        - uppercase
+        - replace underscores with hyphens
+        - remove .corp.local suffix
     """
 
+    value = normalize_text(value)
+
     if pd.isna(value):
-        return None
+        return np.nan
 
-    value = str(value).strip().upper()
-
-    if not value:
-        return None
+    value = value.strip().upper()
 
     value = value.replace("_", "-")
 
-    value = re.sub(
-        r"\.CORP\.LOCAL$",
-        "",
-        value,
-        flags=re.IGNORECASE
-    )
-
-    return value
-
-
-def normalize_manager_username(value):
-    """
-    Normalize manager usernames without inventing missing values.
-    """
-
-    if pd.isna(value):
-        return None
-
-    value = str(value).strip().lower()
-
-    if not value:
-        return None
+    if value.endswith(".CORP.LOCAL"):
+        value = value[:-10]
 
     return value
 
 
 def normalize_device_id(value):
     """
-    Normalize device IDs conservatively.
-
-    Only whitespace/case formatting is standardized.
+    Standardize device identifiers.
     """
+    value = normalize_text(value)
 
     if pd.isna(value):
-        return None
+        return np.nan
 
-    value = str(value).strip().upper()
-
-    if not value:
-        return None
-
-    value = re.sub(r"\s+", "", value)
-
-    return value
+    return value.strip().upper()
 
 
 def normalize_location(value):
     """
-    Normalize location text conservatively.
-
-    We do not merge locations based on assumptions.
+    Standardize location text.
     """
+    value = normalize_text(value)
 
     if pd.isna(value):
-        return None
+        return np.nan
 
-    value = str(value).strip()
-
-    if not value:
-        return None
-
-    value = re.sub(r"\s+", " ", value)
-
-    return value
+    return re.sub(r"\s+", " ", value).strip()
 
 
 # ============================================================
@@ -203,17 +194,17 @@ def normalize_location(value):
 
 def parse_identity_date(value):
     """
-    Parse Identity date values.
+    Parse identity date values from supported formats.
 
     Supported:
-    1. Semantic missing values
-    2. Unix epoch timestamps in seconds
-    3. Common textual date/datetime formats
-    4. Pandas mixed-format fallback
+        - normal date strings
+        - ISO timestamps
+        - common textual date formats
+        - Unix epoch seconds
 
-    Raw values are preserved separately.
+    Invalid/unparseable values return NaT.
 
-    No date is fabricated or inferred.
+    No dates are fabricated.
     """
 
     if pd.isna(value):
@@ -221,25 +212,26 @@ def parse_identity_date(value):
 
     value_str = str(value).strip()
 
-    if not value_str:
+    if value_str == "":
         return pd.NaT
 
-    # --------------------------------------------------------
-    # Semantic missing values
-    # --------------------------------------------------------
+    lower_value = value_str.lower()
 
     semantic_missing = {
-        "not available",
-        "not_available",
-        "n/a",
         "na",
+        "n/a",
         "none",
         "null",
+        "nan",
+        "not available",
+        "not_available",
         "unknown",
-        "-",
+        "missing",
+        "not applicable",
+        "not_applicable",
     }
 
-    if value_str.lower() in semantic_missing:
+    if lower_value in semantic_missing:
         return pd.NaT
 
     # --------------------------------------------------------
@@ -248,66 +240,55 @@ def parse_identity_date(value):
 
     if re.fullmatch(r"\d{10}", value_str):
         try:
-            parsed = pd.to_datetime(
+            return pd.to_datetime(
                 int(value_str),
                 unit="s",
                 errors="coerce"
             )
+        except Exception:
+            return pd.NaT
 
-            if pd.notna(parsed):
-                return parsed
+    # --------------------------------------------------------
+    # Numeric Excel-style serial dates
+    # --------------------------------------------------------
 
+    if re.fullmatch(r"\d{5}", value_str):
+        try:
+            numeric_value = float(value_str)
+
+            # Excel serial dates are generally around this range.
+            if 20000 <= numeric_value <= 60000:
+                return pd.Timestamp("1899-12-30") + pd.to_timedelta(
+                    numeric_value,
+                    unit="D"
+                )
         except Exception:
             pass
 
     # --------------------------------------------------------
-    # Explicit textual formats
+    # Explicit formats
     # --------------------------------------------------------
 
     formats = [
-        # ISO-like
+        "%Y-%m-%d",
+        "%Y/%m/%d",
+        "%d-%m-%Y",
+        "%d/%m/%Y",
+        "%m-%d-%Y",
+        "%m/%d/%Y",
         "%Y-%m-%d %H:%M:%S",
-        "%Y-%m-%d %H:%M",
+        "%Y/%m/%d %H:%M:%S",
+        "%d-%m-%Y %H:%M:%S",
+        "%d/%m/%Y %H:%M:%S",
+        "%m-%d-%Y %H:%M:%S",
+        "%m/%d/%Y %H:%M:%S",
         "%Y-%m-%dT%H:%M:%S",
         "%Y-%m-%dT%H:%M:%S.%f",
-        "%Y-%m-%dT%H:%M:%SZ",
-
-        # YYYY/MM/DD
-        "%Y/%m/%d %H:%M:%S",
-        "%Y/%m/%d %H:%M",
-
-        # DD-MM-YYYY
-        "%d-%m-%Y %H:%M:%S",
-        "%d-%m-%Y %H:%M",
-
-        # DD/MM/YYYY
-        "%d/%m/%Y %H:%M:%S",
-        "%d/%m/%Y %H:%M",
-
-        # MM/DD/YYYY
-        "%m/%d/%Y %H:%M:%S",
-        "%m/%d/%Y %H:%M",
-
-        # MM-DD-YYYY AM/PM
-        "%m-%d-%Y %I:%M:%S %p",
-        "%m-%d-%Y %I:%M %p",
-
-        # MM/DD/YYYY AM/PM
-        "%m/%d/%Y %I:%M:%S %p",
-        "%m/%d/%Y %I:%M %p",
-
-        # Textual month
-        "%d-%b-%Y %H:%M:%S",
-        "%d-%b-%Y %H:%M",
-
-        "%d-%b-%Y %I:%M:%S %p",
-        "%d-%b-%Y %I:%M %p",
-
-        # Date-only
-        "%d/%m/%Y",
-        "%m/%d/%Y",
-        "%Y/%m/%d",
-        "%Y-%m-%d",
+        "%Y-%m-%d %H:%M",
+        "%d-%b-%Y",
+        "%d-%B-%Y",
+        "%b %d, %Y",
+        "%B %d, %Y",
     ]
 
     for fmt in formats:
@@ -318,76 +299,30 @@ def parse_identity_date(value):
                 errors="coerce"
             )
 
-            if pd.notna(parsed):
+            if not pd.isna(parsed):
                 return parsed
-
         except Exception:
             continue
 
     # --------------------------------------------------------
-    # Mixed-format fallback
+    # Final fallback
     # --------------------------------------------------------
 
     try:
-        parsed = pd.to_datetime(
-            value_str,
-            format="mixed",
-            errors="coerce"
-        )
-
-        if pd.notna(parsed):
-            return parsed
-
+        return pd.to_datetime(
+          value_str,
+          errors="coerce",
+          format="mixed"
+      )
     except Exception:
-        pass
-
-    return pd.NaT
-
-
-def date_issue_reason(value):
-    """
-    Classify date values for auditability.
-    """
-
-    if pd.isna(value):
-        return "missing"
-
-    value_str = str(value).strip()
-
-    if not value_str:
-        return "missing"
-
-    semantic_missing = {
-        "not available",
-        "not_available",
-        "n/a",
-        "na",
-        "none",
-        "null",
-        "unknown",
-        "-",
-    }
-
-    if value_str.lower() in semantic_missing:
-        return "semantic_missing"
-
-    parsed = parse_identity_date(value)
-
-    if pd.isna(parsed):
-        return "invalid_format"
-
-    if re.fullmatch(r"\d{10}", value_str):
-        return "unix_epoch"
-
-    return "valid"
+        return pd.NaT
 
 
 # ============================================================
-# CONTROLLED DEPARTMENT MAPPING
+# DEPARTMENT STANDARDIZATION
 # ============================================================
 
 DEPARTMENT_MAP = {
-
     # IT
     "IT": "IT",
     "IT DEPT": "IT",
@@ -401,11 +336,11 @@ DEPARTMENT_MAP = {
     "HUMAN RESOURCES": "Human Resources",
     "PEOPLE TEAM": "Human Resources",
 
-    # Finance
-    "FINANCE": "Finance",
-    "FIN": "Finance",
-    "FINANCE DEPT": "Finance",
-    "ACCOUNTS": "Finance",
+    # R&D
+    "R&D": "R&D",
+    "RD": "R&D",
+    "RND": "R&D",
+    "RESEARCH AND DEVELOPMENT": "R&D",
 
     # Operations
     "OPS": "Operations",
@@ -413,17 +348,27 @@ DEPARTMENT_MAP = {
     "OPERATIONS": "Operations",
     "OPERATIONS DEPT": "Operations",
 
+    # Marketing
+    "MKT": "Marketing",
+    "MKTG": "Marketing",
+    "MARKETING": "Marketing",
+    "MARKETING DEPT": "Marketing",
+
+    # Finance
+    "FINANCE": "Finance",
+    "FIN": "Finance",
+    "FINANCE DEPT": "Finance",
+    "ACCOUNTS": "Finance",
+
     # Procurement
     "PURCHASE": "Procurement",
     "PURCH": "Procurement",
     "PROCUREMENT": "Procurement",
     "PROCUREMENT TEAM": "Procurement",
 
-    # Marketing
-    "MKT": "Marketing",
-    "MKTG": "Marketing",
-    "MARKETING": "Marketing",
-    "MARKETING DEPT": "Marketing",
+    # Legal
+    "LEGAL": "Legal",
+    "LEGAL DEPT": "Legal",
 
     # Sales
     "SALES": "Sales",
@@ -431,38 +376,43 @@ DEPARTMENT_MAP = {
     "SALES DEPT": "Sales",
     "BUSINESS SALES": "Sales",
 
-    # Legal
-    "LEGAL": "Legal",
-    "LEGAL DEPT": "Legal",
-
-    # Research & Development
-    "R&D": "R&D",
-    "RD": "R&D",
-    "RND": "R&D",
-    "RESEARCH AND DEVELOPMENT": "R&D",
-
     # Customer Support
     "CS": "Customer Support",
     "CUSTOMER CARE": "Customer Support",
     "CUSTOMER SUPPORT": "Customer Support",
 
-    # Other explicit organizational categories
+    # Other known canonical departments
     "SUPPORT": "Support",
-    "CALL CENTER": "Call Center",
+    "IT SUPPORT": "IT Support",
     "BRAND TEAM": "Brand",
+    "BRAND": "Brand",
     "COMPLIANCE": "Compliance",
     "INNOVATION": "Innovation",
     "SUPPLY CHAIN": "Supply Chain",
-    "IT SUPPORT": "IT Support",
+    "CALL CENTER": "Call Center",
 }
 
 
+def standardize_department(value):
+    """
+    Standardize department using an explicit controlled mapping.
+    """
+
+    value = normalize_text(value)
+
+    if pd.isna(value):
+        return np.nan
+
+    key = re.sub(r"\s+", " ", value.strip()).upper()
+
+    return DEPARTMENT_MAP.get(key, np.nan)
+
+
 # ============================================================
-# CONTROLLED STATUS MAPPING
+# STATUS STANDARDIZATION
 # ============================================================
 
 STATUS_MAP = {
-
     # Active
     "LIVE": "Active",
     "ACTIVE": "Active",
@@ -481,509 +431,586 @@ STATUS_MAP = {
     "TERMINATED": "Terminated",
     "RESIGNED": "Terminated",
 
-    # On leave
+    # Leave
     "LEAVE": "On Leave",
     "ON LEAVE": "On Leave",
     "ON_LEAVE": "On Leave",
-    "L": "On Leave",
     "LWP": "On Leave",
     "OOO": "On Leave",
+    "L": "On Leave",
 
-    # Preserve as distinct account state
+    # Blocked
     "BLOCKED": "Blocked",
 }
+
+
+def standardize_status(value):
+    """
+    Standardize employee status using an explicit mapping.
+    """
+
+    value = normalize_text(value)
+
+    if pd.isna(value):
+        return np.nan
+
+    key = re.sub(r"\s+", " ", value.strip()).upper()
+
+    return STATUS_MAP.get(key, np.nan)
 
 
 # ============================================================
 # MAIN PIPELINE
 # ============================================================
 
-print("=" * 60)
-print("IDENTITY DATA CLEANING PIPELINE")
-print("=" * 60)
+def main():
 
+    print("=" * 60)
+    print("IDENTITY DATA CLEANING PIPELINE")
+    print("=" * 60)
 
-# ------------------------------------------------------------
-# 1. LOAD
-# ------------------------------------------------------------
+    # --------------------------------------------------------
+    # 1. Load
+    # --------------------------------------------------------
 
-print("\n[1/10] Loading raw identity data...")
+    print("\n[1/10] Loading raw identity data...")
 
-df = pd.read_csv(RAW_FILE)
+    df = pd.read_csv(
+        RAW_FILE,
+        low_memory=False
+    )
 
-raw_rows = len(df)
+    raw_rows = len(df)
 
-print(f"Raw rows loaded: {raw_rows:,}")
+    print(f"Raw rows loaded: {raw_rows:,}")
 
+    # --------------------------------------------------------
+    # 2. Remove exact duplicate rows
+    # --------------------------------------------------------
 
-# ------------------------------------------------------------
-# 2. EXACT DUPLICATES
-# ------------------------------------------------------------
-
-print("\n[2/10] Removing exact duplicate rows...")
-
-duplicate_mask = df.duplicated(keep="first")
-
-exact_duplicates_removed = int(
-    duplicate_mask.sum()
-)
-
-df = df.loc[~duplicate_mask].copy()
-
-print(
-    f"Exact duplicate rows removed: "
-    f"{exact_duplicates_removed:,}"
-)
-
-print(f"Rows remaining: {len(df):,}")
-
-
-# ------------------------------------------------------------
-# 3. USER ID + USERNAME
-# ------------------------------------------------------------
-
-print("\n[3/10] Cleaning user IDs and usernames...")
-
-df["user_id_raw"] = df["user_id"]
-
-df["user_id_clean"] = (
-    df["user_id"].apply(normalize_user_id)
-)
-
-df["user_id_valid"] = (
-    df["user_id"].isna()
-    | df["user_id_clean"].notna()
-)
-
-user_id_invalid = int(
-    (
-        df["user_id"].notna()
-        & df["user_id_clean"].isna()
-    ).sum()
-)
-
-
-df["username_raw"] = df["username"]
-
-df["username_clean"] = (
-    df["username"].apply(normalize_username)
-)
-
-df["username_valid"] = (
-    df["username"].isna()
-    | df["username_clean"].notna()
-)
-
-username_invalid = int(
-    (
-        df["username"].notna()
-        & df["username_clean"].isna()
-    ).sum()
-)
-
-
-# ------------------------------------------------------------
-# 4. DEPARTMENT
-# ------------------------------------------------------------
-
-print("\n[4/10] Standardizing departments...")
-
-df["department_raw"] = df["department"]
-
-department_key = (
-    df["department"].apply(normalize_key)
-)
-
-df["department_clean"] = (
-    department_key.map(DEPARTMENT_MAP)
-)
-
-df["department_valid"] = (
-    df["department"].isna()
-    | df["department_clean"].notna()
-)
-
-department_unmapped = int(
-    (
-        df["department"].notna()
-        & df["department_clean"].isna()
-    ).sum()
-)
-
-
-# ------------------------------------------------------------
-# 5. STATUS
-# ------------------------------------------------------------
-
-print("\n[5/10] Standardizing employee status...")
-
-df["status_raw"] = df["status"]
-
-status_key = (
-    df["status"].apply(normalize_key)
-)
-
-df["status_clean"] = (
-    status_key.map(STATUS_MAP)
-)
-
-df["status_valid"] = (
-    df["status"].isna()
-    | df["status_clean"].notna()
-)
-
-status_unmapped = int(
-    (
-        df["status"].notna()
-        & df["status_clean"].isna()
-    ).sum()
-)
-
-
-# ------------------------------------------------------------
-# 6. HOSTNAME / DEVICE / LOCATION
-# ------------------------------------------------------------
-
-print("\n[6/10] Normalizing hostname, device ID and location...")
-
-# Hostname
-df["hostname_raw"] = df["hostname"]
-
-df["hostname_clean"] = (
-    df["hostname"].apply(normalize_hostname)
-)
-
-df["hostname_valid"] = (
-    df["hostname"].isna()
-    | df["hostname_clean"].notna()
-)
-
-hostname_invalid = int(
-    (
-        df["hostname"].notna()
-        & df["hostname_clean"].isna()
-    ).sum()
-)
-
-
-# Device ID
-df["device_id_raw"] = df["device_id"]
-
-df["device_id_clean"] = (
-    df["device_id"].apply(normalize_device_id)
-)
-
-
-# Location
-df["location_raw"] = df["location"]
-
-df["location_clean"] = (
-    df["location"].apply(normalize_location)
-)
-
-
-# Manager username
-df["manager_username_raw"] = (
-    df["manager_username"]
-)
-
-df["manager_username_clean"] = (
-    df["manager_username"]
-    .apply(normalize_manager_username)
-)
-
-
-# ------------------------------------------------------------
-# 7. DATES
-# ------------------------------------------------------------
-
-print("\n[7/10] Cleaning hire and termination dates...")
-
-
-# Preserve raw values.
-df["hire_date_raw"] = df["hire_date"]
-
-df["termination_date_raw"] = (
-    df["termination_date"]
-)
-
-
-# Parse.
-df["hire_date_clean"] = (
-    df["hire_date"].apply(parse_identity_date)
-)
-
-df["termination_date_clean"] = (
-    df["termination_date"]
-    .apply(parse_identity_date)
-)
-
-
-# Issue classification.
-df["hire_date_issue"] = (
-    df["hire_date"].apply(date_issue_reason)
-)
-
-df["termination_date_issue"] = (
-    df["termination_date"]
-    .apply(date_issue_reason)
-)
-
-
-# Validity.
-df["hire_date_valid"] = (
-    df["hire_date"].isna()
-    | df["hire_date_clean"].notna()
-)
-
-df["termination_date_valid"] = (
-    df["termination_date"].isna()
-    | df["termination_date_clean"].notna()
-)
-
-
-hire_date_invalid = int(
-    (
-        df["hire_date"].notna()
-        & df["hire_date_clean"].isna()
-        & ~df["hire_date_issue"].eq(
-            "semantic_missing"
+    print("\n[2/10] Removing exact duplicate rows...")
+
+    duplicate_mask = df.duplicated(
+        keep="first"
+    )
+
+    exact_duplicates_removed = int(
+        duplicate_mask.sum()
+    )
+
+    df = df.drop_duplicates(
+        keep="first"
+    ).copy()
+
+    print(
+        f"Exact duplicate rows removed: "
+        f"{exact_duplicates_removed:,}"
+    )
+
+    print(
+        f"Rows remaining: {len(df):,}"
+    )
+
+    # --------------------------------------------------------
+    # 3. User IDs and usernames
+    # --------------------------------------------------------
+
+    print(
+        "\n[3/10] Cleaning user IDs and usernames..."
+    )
+
+    df["user_id_clean"] = (
+        df["user_id"]
+        .apply(normalize_user_id)
+    )
+
+    df["username_clean"] = (
+        df["username"]
+        .apply(normalize_username)
+    )
+
+    user_id_invalid = int(
+        df["user_id_clean"].isna().sum()
+    )
+
+    # --------------------------------------------------------
+    # 4. Departments
+    # --------------------------------------------------------
+
+    print(
+        "\n[4/10] Standardizing departments..."
+    )
+
+    df["department_clean"] = (
+        df["department"]
+        .apply(standardize_department)
+    )
+
+    department_unmapped = int(
+        df["department_clean"].isna().sum()
+    )
+
+    # --------------------------------------------------------
+    # 5. Employee status
+    # --------------------------------------------------------
+
+    print(
+        "\n[5/10] Standardizing employee status..."
+    )
+
+    df["status_clean"] = (
+        df["status"]
+        .apply(standardize_status)
+    )
+
+    status_unmapped = int(
+        df["status_clean"].isna().sum()
+    )
+
+    # --------------------------------------------------------
+    # 6. Hostname, device ID and location
+    # --------------------------------------------------------
+
+    print(
+        "\n[6/10] Normalizing hostname, device ID "
+        "and location..."
+    )
+
+    df["hostname_clean"] = (
+        df["hostname"]
+        .apply(normalize_hostname)
+    )
+
+    df["device_id_clean"] = (
+        df["device_id"]
+        .apply(normalize_device_id)
+    )
+
+    df["location_clean"] = (
+        df["location"]
+        .apply(normalize_location)
+    )
+
+    # --------------------------------------------------------
+    # Manager username
+    # --------------------------------------------------------
+
+    df["manager_username_clean"] = (
+        df["manager_username"]
+        .apply(normalize_username)
+    )
+
+    # --------------------------------------------------------
+    # 7. Hire and termination dates
+    # --------------------------------------------------------
+
+    print(
+        "\n[7/10] Cleaning hire and termination dates..."
+    )
+
+    df["hire_date_clean"] = (
+        df["hire_date"]
+        .apply(parse_identity_date)
+    )
+
+    df["termination_date_clean"] = (
+        df["termination_date"]
+        .apply(parse_identity_date)
+    )
+
+    hire_date_invalid = int(
+        (
+            df["hire_date"].notna()
+            & df["hire_date_clean"].isna()
+        ).sum()
+    )
+
+    termination_date_invalid = int(
+        (
+            df["termination_date"].notna()
+            & df["termination_date_clean"].isna()
+        ).sum()
+    )
+
+    # --------------------------------------------------------
+    # 8. Date/status consistency
+    # --------------------------------------------------------
+
+    print(
+        "\n[8/10] Validating date/status consistency..."
+    )
+
+    terminated_mask = (
+        df["status_clean"] == "Terminated"
+    )
+
+    active_like_mask = df["status_clean"].isin(
+        [
+            "Active",
+            "On Leave",
+            "Disabled",
+            "Blocked",
+        ]
+    )
+
+    terminated_missing_date = int(
+        (
+            terminated_mask
+            & df["termination_date_clean"].isna()
+        ).sum()
+    )
+
+    active_with_termination_date = int(
+        (
+            active_like_mask
+            & df["termination_date_clean"].notna()
+        ).sum()
+    )
+
+    hire_after_termination = int(
+        (
+            df["hire_date_clean"].notna()
+            & df["termination_date_clean"].notna()
+            & (
+                df["hire_date_clean"]
+                > df["termination_date_clean"]
+            )
+        ).sum()
+    )
+
+    # --------------------------------------------------------
+    # 9. Final missing-value handling
+    # --------------------------------------------------------
+
+    print(
+        "\n[9/10] Handling missing values..."
+    )
+
+    # ========================================================
+    # IMPORTANT:
+    #
+    # Final analytical dataset must contain ZERO missing cells.
+    #
+    # We use semantic sentinel values for unavailable
+    # categorical/date information rather than fabricating
+    # source values.
+    #
+    # "Unknown"       = source information unavailable
+    # "Not Terminated"= termination date is not applicable
+    # ========================================================
+
+    # --------------------------------------------------------
+    # Text / categorical fields
+    # --------------------------------------------------------
+
+    df["user_id_clean"] = (
+        df["user_id_clean"]
+        .fillna("Unknown")
+    )
+
+    df["username_clean"] = (
+        df["username_clean"]
+        .fillna("Unknown")
+    )
+
+    df["department_clean"] = (
+        df["department_clean"]
+        .fillna("Unknown")
+    )
+
+    df["status_clean"] = (
+        df["status_clean"]
+        .fillna("Unknown")
+    )
+
+    df["manager_username_clean"] = (
+        df["manager_username_clean"]
+        .fillna("Unknown")
+    )
+
+    df["device_id_clean"] = (
+        df["device_id_clean"]
+        .fillna("Unknown")
+    )
+
+    df["location_clean"] = (
+        df["location_clean"]
+        .fillna("Unknown")
+    )
+
+    df["hostname_clean"] = (
+        df["hostname_clean"]
+        .fillna("Unknown")
+    )
+
+    df["full_name"] = (
+        df["full_name"]
+        .fillna("Unknown")
+    )
+
+    df["role"] = (
+        df["role"]
+        .fillna("Unknown")
+    )
+
+    # --------------------------------------------------------
+    # Hire date
+    # --------------------------------------------------------
+    #
+    # IMPORTANT:
+    # Convert datetime column to object BEFORE inserting
+    # the string "Unknown".
+    #
+    # This prevents pandas from raising:
+    #
+    # TypeError:
+    # Invalid value 'Unknown' for dtype datetime64
+    # --------------------------------------------------------
+
+    df["hire_date_clean"] = (
+        df["hire_date_clean"]
+        .astype(object)
+    )
+
+    df["hire_date_clean"] = (
+        df["hire_date_clean"]
+        .where(
+            df["hire_date_clean"].notna(),
+            "Unknown"
         )
-    ).sum()
-)
+    )
 
-termination_date_invalid = int(
-    (
-        df["termination_date"].notna()
-        & df["termination_date_clean"].isna()
-        & ~df["termination_date_issue"].eq(
-            "semantic_missing"
-        )
-    ).sum()
-)
+    # --------------------------------------------------------
+    # Termination date
+    # --------------------------------------------------------
+    #
+    # Convert datetime column to object BEFORE mixing
+    # Timestamp values with semantic strings.
+    # --------------------------------------------------------
 
+    df["termination_date_clean"] = (
+        df["termination_date_clean"]
+        .astype(object)
+    )
 
-# ------------------------------------------------------------
-# 8. DATE / STATUS SEMANTIC VALIDATION
-# ------------------------------------------------------------
+    terminated_mask = (
+        df["status_clean"] == "Terminated"
+    )
 
-print("\n[8/10] Validating date/status consistency...")
+    # Non-terminated employees:
+    # termination date is not applicable.
+    df.loc[
+        ~terminated_mask
+        & df["termination_date_clean"].isna(),
+        "termination_date_clean"
+    ] = "Not Terminated"
 
+    # Terminated employees with no date:
+    # preserve the fact that the date is unknown.
+    df.loc[
+        terminated_mask
+        & df["termination_date_clean"].isna(),
+        "termination_date_clean"
+    ] = "Unknown"
 
-# Terminated employees should normally have a termination date.
-terminated_missing_date = int(
-    (
-        df["status_clean"].eq("Terminated")
-        & df["termination_date_clean"].isna()
-    ).sum()
-)
+    # Safety fallback for any remaining missing values.
+    df["termination_date_clean"] = (
+        df["termination_date_clean"]
+        .fillna("Unknown")
+    )
 
+    # --------------------------------------------------------
+    # 10. Final analytical output
+    # --------------------------------------------------------
 
-# Active employees should normally NOT have a termination date.
-active_with_termination_date = int(
-    (
-        df["status_clean"].eq("Active")
-        & df["termination_date_clean"].notna()
-    ).sum()
-)
+    print(
+        "\n[10/10] Creating final analytical dataset..."
+    )
 
-
-# Hire date after termination date is a chronology anomaly.
-hire_after_termination = int(
-    (
-        df["hire_date_clean"].notna()
-        & df["termination_date_clean"].notna()
-        & (
-            df["hire_date_clean"]
-            > df["termination_date_clean"]
-        )
-    ).sum()
-)
-
-
-df["termination_date_status_issue"] = "none"
-
-df.loc[
-    (
-        df["status_clean"].eq("Terminated")
-        & df["termination_date_clean"].isna()
-    ),
-    "termination_date_status_issue"
-] = "terminated_missing_date"
-
-df.loc[
-    (
-        df["status_clean"].eq("Active")
-        & df["termination_date_clean"].notna()
-    ),
-    "termination_date_status_issue"
-] = "active_with_termination_date"
-
-df.loc[
-    (
-        df["hire_date_clean"].notna()
-        & df["termination_date_clean"].notna()
-        & (
-            df["hire_date_clean"]
-            > df["termination_date_clean"]
-        )
-    ),
-    "termination_date_status_issue"
-] = "hire_after_termination"
-
-
-# ------------------------------------------------------------
-# 9. SEMANTIC MISSING VALUES
-# ------------------------------------------------------------
-
-print("\n[9/10] Preserving semantic missing values...")
-
-# No arbitrary imputation is performed.
-#
-# Examples:
-# - Active employees can legitimately have no termination date.
-# - Manager may be missing.
-# - Device ID may be missing.
-# - Location may be missing.
-# - Hostname may be missing.
-# - Username may be missing.
-#
-# "not available" in termination_date is treated as
-# semantic missing rather than an invented date.
-
-
-# ------------------------------------------------------------
-# 10. SAVE
-# ------------------------------------------------------------
-
-print("\n[10/10] Saving cleaned data and summary...")
-
-
-df.to_csv(
-    OUTPUT_FILE,
-    index=False
-)
-
-
-# ============================================================
-# CLEANING SUMMARY
-# ============================================================
-
-summary = pd.DataFrame(
-    [
-        {
-            "dataset": "identity",
-            "raw_rows": raw_rows,
-            "exact_duplicates_removed":
-                exact_duplicates_removed,
-            "cleaned_rows": len(df),
-
-            "user_id_invalid":
-                user_id_invalid,
-
-            "username_invalid":
-                username_invalid,
-
-            "department_unmapped":
-                department_unmapped,
-
-            "status_unmapped":
-                status_unmapped,
-
-            "hostname_invalid":
-                hostname_invalid,
-
-            "hire_date_invalid":
-                hire_date_invalid,
-
-            "termination_date_invalid":
-                termination_date_invalid,
-
-            "terminated_missing_termination_date":
-                terminated_missing_date,
-
-            "active_with_termination_date":
-                active_with_termination_date,
-
-            "hire_after_termination":
-                hire_after_termination,
-        }
+    final_columns = [
+        "user_id_clean",
+        "username_clean",
+        "department_clean",
+        "status_clean",
+        "hire_date_clean",
+        "termination_date_clean",
+        "manager_username_clean",
+        "device_id_clean",
+        "location_clean",
+        "hostname_clean",
+        "full_name",
+        "role",
     ]
-)
 
-summary.to_csv(
-    SUMMARY_FILE,
-    index=False
-)
+    final_df = df[final_columns].copy()
+
+    # --------------------------------------------------------
+    # Rename columns to clean analytical names
+    # --------------------------------------------------------
+
+    final_df = final_df.rename(
+        columns={
+            "user_id_clean": "user_id",
+            "username_clean": "username",
+            "department_clean": "department",
+            "status_clean": "status",
+            "hire_date_clean": "hire_date",
+            "termination_date_clean": "termination_date",
+            "manager_username_clean": "manager_username",
+            "device_id_clean": "device_id",
+            "location_clean": "location",
+            "hostname_clean": "hostname",
+        }
+    )
+
+    # --------------------------------------------------------
+    # Final safety checks
+    # --------------------------------------------------------
+
+    final_missing_cells = int(
+        final_df.isna().sum().sum()
+    )
+
+    final_duplicate_rows = int(
+        final_df.duplicated().sum()
+    )
+
+    duplicate_user_ids = int(
+        final_df["user_id"]
+        .duplicated()
+        .sum()
+    )
+
+    # --------------------------------------------------------
+    # Do not allow missing values in final output
+    # --------------------------------------------------------
+
+    if final_missing_cells != 0:
+        raise ValueError(
+            "Final Identity dataset still contains "
+            f"{final_missing_cells} missing cells."
+        )
+
+    # --------------------------------------------------------
+    # User ID uniqueness
+    # --------------------------------------------------------
+
+    if duplicate_user_ids != 0:
+        raise ValueError(
+            "Final Identity dataset contains "
+            f"{duplicate_user_ids} duplicate user IDs."
+        )
+
+    # --------------------------------------------------------
+    # Create output directory
+    # --------------------------------------------------------
+
+    OUTPUT_FILE.parent.mkdir(
+        parents=True,
+        exist_ok=True
+    )
+
+    # --------------------------------------------------------
+    # Save final cleaned dataset
+    # --------------------------------------------------------
+
+    final_df.to_csv(
+        OUTPUT_FILE,
+        index=False
+    )
+
+    # ========================================================
+    # FINAL REPORT
+    # ========================================================
+
+    print("\n" + "=" * 60)
+    print("IDENTITY CLEANING SUMMARY")
+    print("=" * 60)
+
+    print(
+        f"Raw rows: {raw_rows:,}"
+    )
+
+    print(
+        f"Exact duplicates removed: "
+        f"{exact_duplicates_removed:,}"
+    )
+
+    print(
+        f"Cleaned rows: {len(final_df):,}"
+    )
+
+    print(
+        f"User ID invalid: {user_id_invalid:,}"
+    )
+
+    print(
+        f"Department unmapped: "
+        f"{department_unmapped:,}"
+    )
+
+    print(
+        f"Status unmapped: "
+        f"{status_unmapped:,}"
+    )
+
+    print(
+        f"Hire date invalid: "
+        f"{hire_date_invalid:,}"
+    )
+
+    print(
+        f"Termination date invalid: "
+        f"{termination_date_invalid:,}"
+    )
+
+    print(
+        f"Terminated + missing termination date: "
+        f"{terminated_missing_date:,}"
+    )
+
+    print(
+        f"Active-like + termination date: "
+        f"{active_with_termination_date:,}"
+    )
+
+    print(
+        f"Hire date after termination date: "
+        f"{hire_after_termination:,}"
+    )
+
+    print(
+        f"Final missing cells: "
+        f"{final_missing_cells:,}"
+    )
+
+    print(
+        f"Final duplicate rows: "
+        f"{final_duplicate_rows:,}"
+    )
+
+    print(
+        f"Duplicate user IDs: "
+        f"{duplicate_user_ids:,}"
+    )
+
+    print(
+        f"Final columns: "
+        f"{len(final_df.columns)}"
+    )
+
+    print(
+        f"\nOutput written to:\n{OUTPUT_FILE}"
+    )
+
+    print("=" * 60)
+    print("IDENTITY CLEANING COMPLETE")
+    print("=" * 60)
 
 
 # ============================================================
-# FINAL OUTPUT
+# ENTRY POINT
 # ============================================================
 
-print("\n" + "=" * 60)
-print("IDENTITY CLEANING COMPLETE")
-print("=" * 60)
-
-print(f"Raw rows                 : {raw_rows:,}")
-
-print(
-    f"Exact duplicates removed : "
-    f"{exact_duplicates_removed:,}"
-)
-
-print(f"Cleaned rows             : {len(df):,}")
-
-print(
-    f"User ID invalid          : "
-    f"{user_id_invalid:,}"
-)
-
-print(
-    f"Username invalid         : "
-    f"{username_invalid:,}"
-)
-
-print(
-    f"Department unmapped      : "
-    f"{department_unmapped:,}"
-)
-
-print(
-    f"Status unmapped          : "
-    f"{status_unmapped:,}"
-)
-
-print(
-    f"Hostname invalid         : "
-    f"{hostname_invalid:,}"
-)
-
-print(
-    f"Hire date invalid        : "
-    f"{hire_date_invalid:,}"
-)
-
-print(
-    f"Termination date invalid : "
-    f"{termination_date_invalid:,}"
-)
-
-print(
-    f"Terminated + missing termination date : "
-    f"{terminated_missing_date:,}"
-)
-
-print(
-    f"Active + termination date             : "
-    f"{active_with_termination_date:,}"
-)
-
-print(
-    f"Hire date after termination date      : "
-    f"{hire_after_termination:,}"
-)
-
-print("\nGenerated:")
-print(f"  {OUTPUT_FILE}")
-print(f"  {SUMMARY_FILE}")
+if __name__ == "__main__":
+    main()

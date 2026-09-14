@@ -1,5 +1,6 @@
 from pathlib import Path
 import re
+import ipaddress
 
 import pandas as pd
 
@@ -10,387 +11,16 @@ import pandas as pd
 
 ROOT = Path(__file__).resolve().parents[2]
 
+RAW_FILE = ROOT / "data" / "raw" / "track2_firewall_logs.csv"
 CLEANED_FILE = ROOT / "data" / "cleaned" / "firewall_cleaned.csv"
+REPORT_FILE = ROOT / "reports" / "firewall_validation_report.csv"
 
 
 # ============================================================
-# VALIDATION HELPERS
+# EXPECTED FINAL ANALYTICAL SCHEMA
 # ============================================================
 
-def check(condition, name, details):
-    status = "PASS" if condition else "FAIL"
-
-    print(
-        f"[{status}] {name}"
-        + (f" -> {details}" if details else "")
-    )
-
-    return {
-        "check": name,
-        "status": status,
-        "details": details,
-    }
-
-
-def valid_ipv4(value):
-    """
-    Validate IPv4 address.
-    """
-    if pd.isna(value):
-        return False
-
-    value = str(value).strip()
-
-    parts = value.split(".")
-
-    if len(parts) != 4:
-        return False
-
-    try:
-        return all(
-            0 <= int(part) <= 255
-            and str(int(part)) == part
-            for part in parts
-        )
-    except ValueError:
-        return False
-
-
-def valid_port(value):
-    """
-    Valid TCP/UDP port range: 1-65535.
-    """
-    if pd.isna(value):
-        return False
-
-    try:
-        value = int(float(value))
-        return 1 <= value <= 65535
-    except (ValueError, TypeError):
-        return False
-
-
-def valid_nonnegative_number(value):
-    """
-    Validate non-negative byte counts.
-    """
-    if pd.isna(value):
-        return False
-
-    try:
-        return float(value) >= 0
-    except (ValueError, TypeError):
-        return False
-
-
-def valid_protocol(value):
-    if pd.isna(value):
-        return False
-
-    return str(value).strip().upper() in {
-        "TCP",
-        "UDP",
-        "ICMP",
-    }
-
-
-def valid_action(value):
-    if pd.isna(value):
-        return False
-
-    return str(value).strip().title() in {
-        "Allow",
-        "Deny",
-        "Drop",
-        "Block",
-    }
-
-
-def valid_threat_flag(value):
-    if pd.isna(value):
-        return False
-
-    if isinstance(value, bool):
-        return True
-
-    return str(value).strip().lower() in {
-        "true",
-        "false",
-    }
-
-
-# ============================================================
-# LOAD
-# ============================================================
-
-print("=" * 70)
-print("FIREWALL CLEANED DATA VALIDATION")
-print("=" * 70)
-
-df = pd.read_csv(CLEANED_FILE)
-
-results = []
-
-
-# ============================================================
-# 1. ROW COUNT
-# ============================================================
-
-results.append(
-    check(
-        len(df) == 30000,
-        "Cleaned row count",
-        f"{len(df):,} rows"
-    )
-)
-
-
-# ============================================================
-# 2. EXACT DUPLICATES
-# ============================================================
-
-exact_duplicates = int(
-    df.duplicated().sum()
-)
-
-results.append(
-    check(
-        exact_duplicates == 0,
-        "Exact duplicate rows",
-        f"{exact_duplicates:,} duplicates"
-    )
-)
-
-
-# ============================================================
-# 3. DUPLICATE LOG IDs
-# ============================================================
-
-duplicate_log_ids = int(
-    df["log_id"]
-    .dropna()
-    .duplicated()
-    .sum()
-)
-
-results.append(
-    check(
-        duplicate_log_ids == 0,
-        "Duplicate log IDs",
-        f"{duplicate_log_ids:,} duplicates"
-    )
-)
-
-
-# ============================================================
-# 4. TIMESTAMP VALIDATION
-# ============================================================
-
-clean_timestamp = pd.to_datetime(
-    df["timestamp_clean"],
-    errors="coerce"
-)
-
-invalid_timestamps = int(
-    (
-        df["timestamp_clean"].notna()
-        & clean_timestamp.isna()
-    ).sum()
-)
-
-results.append(
-    check(
-        invalid_timestamps == 0,
-        "Clean timestamp validity",
-        f"{invalid_timestamps:,} invalid timestamps"
-    )
-)
-
-
-# ============================================================
-# 5. SOURCE IP
-# ============================================================
-
-invalid_src_ip = int(
-    (
-        df["src_ip_clean"].notna()
-        & ~df["src_ip_clean"].apply(valid_ipv4)
-    ).sum()
-)
-
-results.append(
-    check(
-        invalid_src_ip == 0,
-        "Source IP validity",
-        f"{invalid_src_ip:,} invalid cleaned source IPs"
-    )
-)
-
-
-# ============================================================
-# 6. DESTINATION IP
-# ============================================================
-
-invalid_dst_ip = int(
-    (
-        df["dst_ip_clean"].notna()
-        & ~df["dst_ip_clean"].apply(valid_ipv4)
-    ).sum()
-)
-
-results.append(
-    check(
-        invalid_dst_ip == 0,
-        "Destination IP validity",
-        f"{invalid_dst_ip:,} invalid cleaned destination IPs"
-    )
-)
-
-
-# ============================================================
-# 7. SOURCE PORT
-# ============================================================
-
-invalid_src_port = int(
-    (
-        df["src_port_clean"].notna()
-        & ~df["src_port_clean"].apply(valid_port)
-    ).sum()
-)
-
-results.append(
-    check(
-        invalid_src_port == 0,
-        "Source port validity",
-        f"{invalid_src_port:,} invalid cleaned source ports"
-    )
-)
-
-
-# ============================================================
-# 8. DESTINATION PORT
-# ============================================================
-
-invalid_dst_port = int(
-    (
-        df["dst_port_clean"].notna()
-        & ~df["dst_port_clean"].apply(valid_port)
-    ).sum()
-)
-
-results.append(
-    check(
-        invalid_dst_port == 0,
-        "Destination port validity",
-        f"{invalid_dst_port:,} invalid cleaned destination ports"
-    )
-)
-
-
-# ============================================================
-# 9. BYTE COUNTS
-# ============================================================
-
-invalid_bytes_sent = int(
-    (
-        df["bytes_sent_clean"].notna()
-        & ~df["bytes_sent_clean"].apply(
-            valid_nonnegative_number
-        )
-    ).sum()
-)
-
-invalid_bytes_received = int(
-    (
-        df["bytes_received_clean"].notna()
-        & ~df["bytes_received_clean"].apply(
-            valid_nonnegative_number
-        )
-    ).sum()
-)
-
-results.append(
-    check(
-        invalid_bytes_sent == 0,
-        "Bytes sent validity",
-        f"{invalid_bytes_sent:,} invalid values"
-    )
-)
-
-results.append(
-    check(
-        invalid_bytes_received == 0,
-        "Bytes received validity",
-        f"{invalid_bytes_received:,} invalid values"
-    )
-)
-
-
-# ============================================================
-# 10. PROTOCOL
-# ============================================================
-
-invalid_protocol = int(
-    (
-        df["protocol_clean"].notna()
-        & ~df["protocol_clean"].apply(valid_protocol)
-    ).sum()
-)
-
-results.append(
-    check(
-        invalid_protocol == 0,
-        "Protocol standardization",
-        f"{invalid_protocol:,} invalid protocols"
-    )
-)
-
-
-# ============================================================
-# 11. ACTION
-# ============================================================
-
-invalid_action = int(
-    (
-        df["action_clean"].notna()
-        & ~df["action_clean"].apply(valid_action)
-    ).sum()
-)
-
-results.append(
-    check(
-        invalid_action == 0,
-        "Action standardization",
-        f"{invalid_action:,} invalid actions"
-    )
-)
-
-
-# ============================================================
-# 12. THREAT FLAG
-# ============================================================
-
-invalid_threat_flag = int(
-    (
-        df["threat_flag_clean"].notna()
-        & ~df["threat_flag_clean"].apply(valid_threat_flag)
-    ).sum()
-)
-
-results.append(
-    check(
-        invalid_threat_flag == 0,
-        "Threat flag validity",
-        f"{invalid_threat_flag:,} invalid threat flags"
-    )
-)
-
-
-# ============================================================
-# 13. RAW COLUMN PRESERVATION
-# ============================================================
-
-expected_raw_columns = [
+EXPECTED_COLUMNS = [
     "log_id",
     "timestamp",
     "hostname",
@@ -408,115 +38,573 @@ expected_raw_columns = [
     "geo_country",
 ]
 
-missing_raw_columns = [
-    column
-    for column in expected_raw_columns
-    if column not in df.columns
-]
+
+# ============================================================
+# VALIDATION HELPERS
+# ============================================================
+
+def check(condition, name, value, expected):
+    status = "PASS" if condition else "FAIL"
+
+    print(
+        f"[{'PASS' if condition else 'FAIL'}] "
+        f"{name} -> {value}"
+    )
+
+    return {
+        "check": name,
+        "value": value,
+        "expected": expected,
+        "status": status,
+    }
+
+
+def valid_ipv4(value):
+    """
+    Validate a final analytical IPv4 value.
+
+    'Unknown' is an accepted semantic representation for
+    unavailable/invalid source IPs after cleaning.
+    """
+    if pd.isna(value):
+        return False
+
+    value = str(value).strip()
+
+    if value == "Unknown":
+        return True
+
+    try:
+        ip = ipaddress.ip_address(value)
+        return ip.version == 4
+    except ValueError:
+        return False
+
+
+def valid_port(value):
+    """
+    Valid network port range: 1-65535.
+
+    'Unknown' is accepted as the semantic representation
+    for unavailable source values.
+    """
+    if pd.isna(value):
+        return False
+
+    value = str(value).strip()
+
+    if value == "Unknown":
+        return True
+
+    try:
+        number = float(value)
+
+        if not number.is_integer():
+            return False
+
+        number = int(number)
+
+        return 1 <= number <= 65535
+
+    except (ValueError, TypeError):
+        return False
+
+
+def valid_nonnegative_number(value):
+    """
+    Validate non-negative byte counts.
+
+    'Unknown' is accepted as the semantic representation
+    for unavailable source values.
+    """
+    if pd.isna(value):
+        return False
+
+    value = str(value).strip()
+
+    if value == "Unknown":
+        return True
+
+    try:
+        return float(value) >= 0
+    except (ValueError, TypeError):
+        return False
+
+
+def valid_protocol(value):
+    if pd.isna(value):
+        return False
+
+    return str(value).strip().upper() in {
+        "TCP",
+        "UDP",
+        "ICMP",
+        "Unknown",
+    }
+
+
+def valid_action(value):
+    if pd.isna(value):
+        return False
+
+    return str(value).strip().title() in {
+        "Allow",
+        "Deny",
+        "Drop",
+        "Block",
+        "Unknown",
+    }
+
+
+def valid_threat_flag(value):
+    """
+    Accept boolean values and their canonical string forms.
+    """
+    if pd.isna(value):
+        return False
+
+    if isinstance(value, bool):
+        return True
+
+    value = str(value).strip().lower()
+
+    return value in {
+        "true",
+        "false",
+    }
+
+
+def valid_log_id(value):
+    """
+    log_id must be present and non-empty.
+    """
+    if pd.isna(value):
+        return False
+
+    return str(value).strip() != ""
+
+
+# ============================================================
+# HEADER
+# ============================================================
+
+print("=" * 70)
+print("FIREWALL CLEANED DATA VALIDATION")
+print("=" * 70)
+
+
+# ============================================================
+# LOAD DATA
+# ============================================================
+
+print("\n[1/12] Loading raw and cleaned data...")
+
+raw_df = pd.read_csv(RAW_FILE)
+df = pd.read_csv(CLEANED_FILE)
+
+print(f"Raw rows     : {len(raw_df):,}")
+print(f"Cleaned rows : {len(df):,}")
+
+
+results = []
+
+
+# ============================================================
+# 1. ROW COUNT
+# ============================================================
+
+print("\n[2/12] Checking row count...")
+
+raw_exact_duplicates = int(
+    raw_df.duplicated().sum()
+)
+
+expected_cleaned_rows = len(raw_df) - raw_exact_duplicates
+actual_cleaned_rows = len(df)
 
 results.append(
     check(
-        len(missing_raw_columns) == 0,
-        "Raw column preservation",
-        (
-            "All raw columns preserved"
-            if not missing_raw_columns
-            else str(missing_raw_columns)
-        )
+        actual_cleaned_rows == expected_cleaned_rows,
+        "Cleaned row count",
+        f"{actual_cleaned_rows:,} rows",
+        f"{expected_cleaned_rows:,} rows",
     )
 )
 
 
 # ============================================================
-# 14. CLEAN COLUMN PRESENCE
+# 2. FINAL ANALYTICAL SCHEMA
 # ============================================================
 
-expected_clean_columns = [
-    "timestamp_clean",
-    "timestamp_valid",
-    "src_ip_clean",
-    "src_ip_valid",
-    "dst_ip_clean",
-    "dst_ip_valid",
-    "src_port_clean",
-    "src_port_valid",
-    "dst_port_clean",
-    "dst_port_valid",
-    "bytes_sent_clean",
-    "bytes_received_clean",
-    "protocol_clean",
-    "action_clean",
-    "threat_flag_clean",
+print("\n[3/12] Checking final analytical schema...")
+
+actual_columns = list(df.columns)
+
+missing_columns = [
+    column
+    for column in EXPECTED_COLUMNS
+    if column not in actual_columns
 ]
 
-missing_clean_columns = [
+unexpected_columns = [
     column
-    for column in expected_clean_columns
-    if column not in df.columns
+    for column in actual_columns
+    if column not in EXPECTED_COLUMNS
 ]
+
+schema_valid = (
+    len(actual_columns) == len(EXPECTED_COLUMNS)
+    and not missing_columns
+    and not unexpected_columns
+    and actual_columns == EXPECTED_COLUMNS
+)
+
+print(f"Expected columns : {len(EXPECTED_COLUMNS)}")
+print(f"Actual columns   : {len(actual_columns)}")
+print(f"Missing columns  : {missing_columns or 'None'}")
+print(f"Unexpected columns: {unexpected_columns or 'None'}")
 
 results.append(
     check(
-        len(missing_clean_columns) == 0,
-        "Cleaned column presence",
-        (
-            "All expected cleaned columns present"
-            if not missing_clean_columns
-            else str(missing_clean_columns)
-        )
+        schema_valid,
+        "Final analytical schema",
+        f"{len(actual_columns)} columns",
+        f"{len(EXPECTED_COLUMNS)} columns",
     )
 )
 
 
 # ============================================================
-# 15. VALIDATION FLAG CONSISTENCY
+# 3. DUPLICATES
 # ============================================================
 
-flag_columns = [
-    "timestamp_valid",
-    "src_ip_valid",
-    "dst_ip_valid",
-    "src_port_valid",
-    "dst_port_valid",
-]
+print("\n[4/12] Checking duplicates...")
 
-flag_failures = 0
+exact_duplicates = int(
+    df.duplicated().sum()
+)
 
-for column in flag_columns:
-    if column not in df.columns:
-        flag_failures += 1
-        continue
+duplicate_log_ids = int(
+    df["log_id"]
+    .dropna()
+    .astype(str)
+    .str.strip()
+    .duplicated()
+    .sum()
+)
 
-    # Validation flags may use semantic states:
-    # valid, invalid, missing
-    # Timestamp flags may also be boolean-like after CSV reload.
-    values = (
-        df[column]
-        .dropna()
-        .astype(str)
-        .str.strip()
-        .str.lower()
-    )
-
-    invalid_values = (
-        ~values.isin({
-            "valid",
-            "invalid",
-            "missing",
-            "true",
-            "false",
-            "0",
-            "1",
-        })
-    ).sum()
-
-    flag_failures += int(invalid_values)
+print(f"Exact duplicate rows remaining : {exact_duplicates}")
+print(f"Duplicate log IDs remaining    : {duplicate_log_ids}")
 
 results.append(
     check(
-        flag_failures == 0,
-        "Validation flag consistency",
-        f"{flag_failures:,} invalid flag values"
+        exact_duplicates == 0,
+        "Exact duplicate rows",
+        exact_duplicates,
+        0,
+    )
+)
+
+results.append(
+    check(
+        duplicate_log_ids == 0,
+        "Duplicate log IDs",
+        duplicate_log_ids,
+        0,
+    )
+)
+
+
+# ============================================================
+# 4. LOG ID VALIDATION
+# ============================================================
+
+print("\n[5/12] Validating log IDs...")
+
+invalid_log_ids = int(
+    (~df["log_id"].apply(valid_log_id))
+    .sum()
+)
+
+print(f"Invalid log IDs : {invalid_log_ids}")
+
+results.append(
+    check(
+        invalid_log_ids == 0,
+        "Log ID validity",
+        invalid_log_ids,
+        0,
+    )
+)
+
+
+# ============================================================
+# 5. TIMESTAMP VALIDATION
+# ============================================================
+
+print("\n[6/12] Validating timestamps...")
+
+timestamp_text = (
+    df["timestamp"]
+    .astype(str)
+    .str.strip()
+)
+
+timestamp_unknown = int(
+    (timestamp_text == "Unknown").sum()
+)
+
+timestamp_series = pd.to_datetime(
+    df.loc[
+        timestamp_text != "Unknown",
+        "timestamp"
+    ],
+    errors="coerce",
+)
+
+invalid_timestamps = int(
+    timestamp_series.isna().sum()
+)
+
+print(f"Unknown timestamps : {timestamp_unknown:,}")
+print(f"Invalid timestamps : {invalid_timestamps:,}")
+
+results.append(
+    check(
+        invalid_timestamps == 0,
+        "Timestamp validity",
+        invalid_timestamps,
+        0,
+    )
+)
+
+
+# ============================================================
+# 6. IP VALIDATION
+# ============================================================
+
+print("\n[7/12] Validating IP addresses...")
+
+invalid_src_ip = int(
+    (~df["src_ip"].apply(valid_ipv4))
+    .sum()
+)
+
+invalid_dst_ip = int(
+    (~df["dst_ip"].apply(valid_ipv4))
+    .sum()
+)
+
+print(f"Invalid source IPs      : {invalid_src_ip:,}")
+print(f"Invalid destination IPs : {invalid_dst_ip:,}")
+
+results.append(
+    check(
+        invalid_src_ip == 0,
+        "Source IP validity",
+        invalid_src_ip,
+        0,
+    )
+)
+
+results.append(
+    check(
+        invalid_dst_ip == 0,
+        "Destination IP validity",
+        invalid_dst_ip,
+        0,
+    )
+)
+
+
+# ============================================================
+# 7. PORT VALIDATION
+# ============================================================
+
+print("\n[8/12] Validating network ports...")
+
+invalid_src_port = int(
+    (~df["src_port"].apply(valid_port))
+    .sum()
+)
+
+invalid_dst_port = int(
+    (~df["dst_port"].apply(valid_port))
+    .sum()
+)
+
+print(f"Invalid source ports      : {invalid_src_port:,}")
+print(f"Invalid destination ports : {invalid_dst_port:,}")
+
+results.append(
+    check(
+        invalid_src_port == 0,
+        "Source port validity",
+        invalid_src_port,
+        0,
+    )
+)
+
+results.append(
+    check(
+        invalid_dst_port == 0,
+        "Destination port validity",
+        invalid_dst_port,
+        0,
+    )
+)
+
+
+# ============================================================
+# 8. BYTE VALIDATION
+# ============================================================
+
+print("\n[9/12] Validating byte counts...")
+
+invalid_bytes_sent = int(
+    (~df["bytes_sent"].apply(valid_nonnegative_number))
+    .sum()
+)
+
+invalid_bytes_received = int(
+    (~df["bytes_received"].apply(valid_nonnegative_number))
+    .sum()
+)
+
+print(f"Invalid bytes sent     : {invalid_bytes_sent:,}")
+print(f"Invalid bytes received : {invalid_bytes_received:,}")
+
+results.append(
+    check(
+        invalid_bytes_sent == 0,
+        "Bytes sent validity",
+        invalid_bytes_sent,
+        0,
+    )
+)
+
+results.append(
+    check(
+        invalid_bytes_received == 0,
+        "Bytes received validity",
+        invalid_bytes_received,
+        0,
+    )
+)
+
+
+# ============================================================
+# 9. CATEGORICAL STANDARDIZATION
+# ============================================================
+
+print("\n[10/12] Validating categorical standardization...")
+
+invalid_protocol = int(
+    (~df["protocol"].apply(valid_protocol))
+    .sum()
+)
+
+invalid_action = int(
+    (~df["action"].apply(valid_action))
+    .sum()
+)
+
+invalid_threat_flag = int(
+    (~df["threat_flag"].apply(valid_threat_flag))
+    .sum()
+)
+
+print(f"Invalid protocol values   : {invalid_protocol:,}")
+print(f"Invalid action values     : {invalid_action:,}")
+print(f"Invalid threat flag values: {invalid_threat_flag:,}")
+
+results.append(
+    check(
+        invalid_protocol == 0,
+        "Protocol standardization",
+        invalid_protocol,
+        0,
+    )
+)
+
+results.append(
+    check(
+        invalid_action == 0,
+        "Action standardization",
+        invalid_action,
+        0,
+    )
+)
+
+results.append(
+    check(
+        invalid_threat_flag == 0,
+        "Threat flag validity",
+        invalid_threat_flag,
+        0,
+    )
+)
+
+
+# ============================================================
+# 10. FINAL COMPLETENESS
+# ============================================================
+
+print("\n[11/12] Checking final completeness...")
+
+final_missing_cells = int(
+    df.isna().sum().sum()
+)
+
+empty_string_cells = int(
+    (
+        df.astype(str)
+        .apply(lambda column: column.str.strip().eq("").sum())
+        .sum()
+    )
+)
+
+print(f"Final missing cells : {final_missing_cells:,}")
+print(f"Empty string cells  : {empty_string_cells:,}")
+
+results.append(
+    check(
+        final_missing_cells == 0,
+        "Final missing cells",
+        final_missing_cells,
+        0,
+    )
+)
+
+results.append(
+    check(
+        empty_string_cells == 0,
+        "Empty string cells",
+        empty_string_cells,
+        0,
+    )
+)
+
+
+# ============================================================
+# 11. SOURCE DUPLICATE RECONCILIATION
+# ============================================================
+
+print("\n[12/12] Reconciling duplicate removal...")
+
+duplicates_removed = len(raw_df) - len(df)
+
+print(f"Raw exact duplicates       : {raw_exact_duplicates:,}")
+print(f"Rows removed from raw data : {duplicates_removed:,}")
+print(f"Expected rows              : {expected_cleaned_rows:,}")
+print(f"Actual cleaned rows        : {actual_cleaned_rows:,}")
+
+results.append(
+    check(
+        duplicates_removed == raw_exact_duplicates,
+        "Duplicate removal reconciliation",
+        duplicates_removed,
+        raw_exact_duplicates,
     )
 )
 
@@ -535,23 +623,46 @@ failed = int(
     (results_df["status"] == "FAIL").sum()
 )
 
+
+# ============================================================
+# SAVE REPORT
+# ============================================================
+
+REPORT_FILE.parent.mkdir(
+    parents=True,
+    exist_ok=True,
+)
+
+results_df.to_csv(
+    REPORT_FILE,
+    index=False,
+)
+
+
+# ============================================================
+# PRINT SUMMARY
+# ============================================================
+
 print("\n" + "=" * 70)
-print("VALIDATION SUMMARY")
+print("FIREWALL VALIDATION SUMMARY")
 print("=" * 70)
 
-print(f"Checks passed : {passed}")
-print(f"Checks failed : {failed}")
+print(f"PASS checks : {passed}")
+print(f"FAIL checks : {failed}")
+
+print("\nValidation results:")
+print(
+    results_df.to_string(index=False)
+)
+
+print("\nGenerated:")
+print(f"  {REPORT_FILE}")
+
+print("\n" + "=" * 70)
 
 if failed == 0:
-    print("\nRESULT: ALL FIREWALL VALIDATION CHECKS PASSED")
+    print("RESULT: ALL FIREWALL VALIDATION CHECKS PASSED")
 else:
-    print("\nRESULT: VALIDATION FAILURES FOUND")
-
-    print("\nFailed checks:")
-    print(
-        results_df[
-            results_df["status"] == "FAIL"
-        ].to_string(index=False)
-    )
+    print("RESULT: FIREWALL VALIDATION FAILURES FOUND")
 
 print("=" * 70)

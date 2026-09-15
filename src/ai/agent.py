@@ -1,16 +1,15 @@
 """
 TraceONE AI Investigator Agent Orchestrator.
 Main entry point orchestrating Safety Defense -> Entity Resolution -> Planner -> TraceONE Tools -> Evidence Package -> LLM Generation -> Visualization Selection.
-Enforces read-only safety, zero hallucinated facts, explicit uncertainty, and observability traces.
+Enforces read-only safety, zero hallucinated facts, explicit uncertainty, provider flexibility (Ollama / Mistral), and observability traces.
 """
 
 import time
 import json
-from typing import Dict, Any
+from typing import Dict, Any, Optional
 
 from src.ai.config import AIConfig
-from src.ai.llm.ollama_provider import OllamaProvider
-from src.ai.llm.mock_provider import MockProvider
+from src.ai.llm import LLMProvider, OllamaProvider, MistralProvider, MockProvider, get_provider
 from src.ai.planner.planner import QueryPlanner
 from src.ai.executor.entity_resolver import EntityResolver
 from src.ai.tools.traceone_tools import TraceONEToolkit
@@ -21,20 +20,32 @@ from src.ai.visualization.chart_selector import VisualizationSelector
 
 class TraceONEAgent:
 
-    def __init__(self, provider_override=None):
+    def __init__(self, provider_override=None, provider_name: str = None):
         if provider_override:
             self.llm = provider_override
+        elif provider_name:
+            self.llm = get_provider(provider_name)
         else:
-            ollama = OllamaProvider()
-            if ollama.health_check():
-                self.llm = ollama
+            # Default selection based on AIConfig / Ollama availability
+            selected_provider = get_provider(AIConfig.LLM_PROVIDER)
+            if selected_provider.health_check():
+                self.llm = selected_provider
             else:
                 self.llm = MockProvider()
 
         self.planner = QueryPlanner(self.llm)
         self.resolver = EntityResolver()
         self.toolkit = TraceONEToolkit()
-        self.active_context_entity: str = None
+        self.active_context_entity: Optional[str] = None
+
+    def set_provider(self, provider_or_name) -> None:
+        """Dynamically switch LLM provider without resetting agent state or tools."""
+        if isinstance(provider_or_name, LLMProvider):
+            self.llm = provider_or_name
+        elif isinstance(provider_or_name, str):
+            self.llm = get_provider(provider_or_name)
+        # Keep planner updated with current LLM provider
+        self.planner.llm = self.llm
 
     def query(self, user_text: str, session_entity: str = None) -> dict:
         """Process user natural language query end-to-end and return complete investigation package."""
@@ -109,14 +120,23 @@ Format into clear sections:
 
         answer_text = self.llm.generate(generation_prompt, system_prompt=SYSTEM_SAFETY_PROMPT)
 
-        # Fallback formatting if Ollama unavailable or error
-        if "OLLAMA_UNAVAILABLE_ERROR" in answer_text or not answer_text.strip():
-            answer_text = self._build_deterministic_answer_fallback(clean_user_text, evidence_package)
+        # Fallback formatting if Ollama/Mistral is unavailable, error, or empty
+        if "OLLAMA_UNAVAILABLE_ERROR" in answer_text or "MISTRAL_UNAVAILABLE_ERROR" in answer_text or not str(answer_text).strip():
+            answer_text = self._build_deterministic_answer_fallback(clean_user_text, evidence_package, error_context=answer_text)
 
         # 7. Visualization Selection
         plotly_fig = VisualizationSelector.render_spec(plan.visualization, evidence_package)
 
         execution_time = round(time.time() - start_time, 2)
+
+        # Provider/Model metadata
+        provider_class = self.llm.__class__.__name__
+        if isinstance(self.llm, MistralProvider):
+            model_name = self.llm.model
+        elif isinstance(self.llm, OllamaProvider):
+            model_name = self.llm.model
+        else:
+            model_name = "Mock (Deterministic)"
 
         # 8. Return Observability Package
         return {
@@ -128,11 +148,11 @@ Format into clear sections:
             "visualization_type": plan.visualization,
             "figure": plotly_fig,
             "execution_time_sec": execution_time,
-            "llm_provider": self.llm.__class__.__name__,
-            "model_name": AIConfig.LLM_MODEL
+            "llm_provider": provider_class,
+            "model_name": model_name
         }
 
-    def _build_deterministic_answer_fallback(self, query: str, package: dict) -> str:
+    def _build_deterministic_answer_fallback(self, query: str, package: dict, error_context: str = None) -> str:
         """Deterministic fallback answer generator when LLM is offline or timed out."""
         entity = package.get("entity", {})
         risk = package.get("risk_assessment", {})
@@ -142,8 +162,12 @@ Format into clear sections:
         status = entity.get("status", "RESOLVED")
         requested_id = entity.get("entity_id") or "N/A"
 
+        error_notice = ""
+        if error_context and "UNAVAILABLE_ERROR" in error_context:
+            error_notice = f"\n> ⚠️ **Provider Notice**: {error_context}\n\n"
+
         if status == "NOT_FOUND" or risk.get("found") is False:
-            return f"""### 🛡️ TraceONE Evidence-Grounded Investigation Summary
+            return f"""{error_notice}### 🛡️ TraceONE Evidence-Grounded Investigation Summary
 
 **Executive Summary:**
 No matching telemetry or entity record was found for requested entity **`{requested_id}`** in canonical TraceONE indexes.
@@ -162,7 +186,7 @@ No matching telemetry or entity record was found for requested entity **`{reques
         if status == "AMBIGUOUS":
             candidates = entity.get("candidates", [])
             cand_str = ", ".join([f"`{c.get('id')}` ({c.get('dept', 'N/A')})" for c in candidates]) if candidates else "Multiple entities"
-            return f"""### 🛡️ TraceONE Ambiguity Resolution Notice
+            return f"""{error_notice}### 🛡️ TraceONE Ambiguity Resolution Notice
 
 **Executive Summary:**
 The query **"{query}"** matched multiple possible candidate entities in canonical indexes. TraceONE explicitly refuses to arbitrarily select an entity.
@@ -181,7 +205,7 @@ Please refine your search query using an exact Entity ID (e.g., `EMP10194`).
         hyp = risk.get("primary_hypothesis", "POSSIBLE_CREDENTIAL_COMPROMISE")
         contribs = risk.get("top_contributors", {})
 
-        return f"""### 🛡️ TraceONE Evidence-Grounded Investigation Summary
+        return f"""{error_notice}### 🛡️ TraceONE Evidence-Grounded Investigation Summary
 
 **Executive Summary:**
 Entity **`{e_id}`** is assessed at **{r_score:.1f} / 100 ({r_lvl})** risk severity with **{c_lvl}** evidence confidence. Primary investigative hypothesis is **`{hyp}`**.
@@ -202,4 +226,3 @@ Entity **`{e_id}`** is assessed at **{r_score:.1f} / 100 ({r_lvl})** risk severi
 **Data Trust & Limitations:**
 - Analysis grounded in fixed telemetry window `2026-08-01 → 2026-08-15` with 82.9% valid timestamp coverage (17.1% unknown timestamps preserved).
 """
-

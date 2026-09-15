@@ -147,6 +147,11 @@ TRACEONE features a local, evidence-first AI Investigator powered by `qwen3:8b` 
  Synthesized Grounded Response + Visualization Component Selector (Risk Gauge, Timeline, Graph)
 ```
 
+### Dual Model Provider Support (Local vs Cloud API)
+Both providers use the identical TraceONE deterministic investigation pipeline, tools, EvidencePackage, prompt defense, and visualization system. Changing the LLM model does NOT change the underlying security evidence:
+1. **Qwen3:8B via Local Ollama**: Default local execution with 100% privacy (`OLLAMA_BASE_URL=http://localhost:11434`).
+2. **Mistral Cloud API**: Cloud API model option (`MISTRAL_MODEL=mistral-small-latest`, requires `MISTRAL_API_KEY` in environment).
+
 ### Core AI Safety Principles
 1. **"The LLM is not the source of truth."** All facts come from TraceONE's deterministic tools.
 2. **"Zero arbitrary code execution."** No `eval()`, `exec()`, shell execution, or arbitrary SQL query execution paths exist.

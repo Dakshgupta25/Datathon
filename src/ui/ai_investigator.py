@@ -1,7 +1,7 @@
 """
 TraceONE — AI Investigator Module UI
-Phase M: Agentic Graph AI / AI Investigator Interface
-Renders evidence-first natural language investigation interface backed by Qwen3:8B / Ollama and TraceONE tools.
+Phase M & Phase Expansion: Agentic Graph AI / AI Investigator Interface
+Renders evidence-first natural language investigation interface backed by Qwen3:8B / Ollama or Mistral Cloud API and TraceONE tools.
 """
 
 import streamlit as st
@@ -14,6 +14,7 @@ import time
 from src.ai.agent import TraceONEAgent
 from src.ai.config import AIConfig
 from src.ai.llm.ollama_provider import OllamaProvider
+from src.ai.llm.mistral_provider import MistralProvider
 
 
 def render_ai_investigator():
@@ -23,7 +24,7 @@ def render_ai_investigator():
     # HEADER & TITLE
     # ---------------------------------------------------------
     st.markdown('<div class="traceone-title">🤖 TRACEONE AI INVESTIGATOR</div>', unsafe_allow_html=True)
-    st.markdown('<div class="traceone-tagline">Evidence-First Agentic Threat Reasoning & Natural Language Querying (Qwen3:8B)</div>', unsafe_allow_html=True)
+    st.markdown('<div class="traceone-tagline">Evidence-First Agentic Threat Reasoning & Natural Language Querying</div>', unsafe_allow_html=True)
 
     # Initialize Agent in Session State
     if 'ai_agent' not in st.session_state:
@@ -35,37 +36,109 @@ def render_ai_investigator():
     if 'ai_chat_history' not in st.session_state:
         st.session_state['ai_chat_history'] = []
 
-    # ---------------------------------------------------------
-    # STATUS & PROVIDER BANNER
-    # ---------------------------------------------------------
-    ollama_online = OllamaProvider().check_health()
-    provider_name = "Ollama Local Adapter" if ollama_online else "Deterministic Fallback Adapter"
-    status_color = "#00E676" if ollama_online else "#FFA500"
-    status_text = "ONLINE (qwen3:8b)" if ollama_online else "FALLBACK (Deterministic Summary)"
+    # Initialize Provider Choice
+    if 'selected_provider_type' not in st.session_state:
+        st.session_state['selected_provider_type'] = AIConfig.LLM_PROVIDER if AIConfig.LLM_PROVIDER in ["ollama", "mistral"] else "ollama"
 
-    st.markdown(f"""
-    <div style="background: linear-gradient(135deg, rgba(124,77,255,0.08) 0%, rgba(22,27,34,0.95) 100%); border: 1px solid #7C4DFF; border-radius: 8px; padding: 14px; margin-bottom: 20px;">
-        <div style="display:flex; justify-content:space-between; align-items:center;">
-            <div>
-                <span class="badge badge-cyan">MODEL: {AIConfig.LLM_MODEL}</span>
-                <span class="badge" style="background-color:rgba(124,77,255,0.2); color:#7C4DFF; border:1px solid #7C4DFF;">ENDPOINT: {AIConfig.OLLAMA_BASE_URL}</span>
-                <h4 style="color:#7C4DFF !important; margin-top:8px; margin-bottom:2px;">AGENTIC THREAT REASONING ENGINE</h4>
-                <p style="font-size:0.85rem; color:#C9D1D9; margin:0;">
-                    <b>Core Policy:</b> <i>"No claim without evidence."</i> Qwen3:8B orchestrates queries and synthesizes explanations. TraceONE deterministic tools remain the sole source of truth.
-                </p>
-            </div>
-            <div style="text-align:right; min-width:160px;">
-                <div style="font-size:1.1rem; font-weight:700; color:{status_color};">{status_text}</div>
-                <div style="font-size:0.75rem; color:#8B949E; text-transform:uppercase;">{provider_name}</div>
+    # ---------------------------------------------------------
+    # MODEL & PROVIDER SELECTOR TOOLBAR
+    # ---------------------------------------------------------
+    col_prov1, col_prov2 = st.columns([1, 2])
+
+    with col_prov1:
+        st.markdown("##### ⚙️ Select AI Model Provider")
+        provider_choice = st.radio(
+            "Model Provider",
+            options=["Qwen3:8B — Local Ollama", "Mistral — Cloud API"],
+            index=0 if st.session_state['selected_provider_type'] == "ollama" else 1,
+            label_visibility="collapsed",
+            key="provider_radio"
+        )
+        
+        target_provider_name = "ollama" if "Ollama" in provider_choice else "mistral"
+        if target_provider_name != st.session_state['selected_provider_type']:
+            st.session_state['selected_provider_type'] = target_provider_name
+            agent.set_provider(target_provider_name)
+
+    # ---------------------------------------------------------
+    # STATUS & PRIVACY BANNER
+    # ---------------------------------------------------------
+    current_provider_type = st.session_state['selected_provider_type']
+
+    if current_provider_type == "ollama":
+        ollama_online = OllamaProvider().check_health()
+        model_display = AIConfig.LLM_MODEL
+        endpoint_display = AIConfig.OLLAMA_BASE_URL
+        status_color = "#00E676" if ollama_online else "#FFA500"
+        status_text = "ONLINE (qwen3:8b)" if ollama_online else "OFFLINE / FALLBACK MODE"
+        provider_label = "Local Ollama Engine"
+        privacy_badge = "LOCAL — telemetry remains on this machine."
+        privacy_color = "rgba(0, 230, 118, 0.15)"
+        privacy_border = "#00E676"
+    else: # mistral
+        mistral_prov = MistralProvider()
+        mistral_status = mistral_prov.status()
+        model_display = AIConfig.MISTRAL_MODEL
+        endpoint_display = "https://api.mistral.ai"
+        
+        if mistral_status == "CONFIGURED":
+            status_color = "#00E676"
+            status_text = f"CONFIGURED ({AIConfig.MISTRAL_MODEL})"
+            provider_label = "Mistral Cloud API"
+            privacy_badge = "CLOUD API — selected evidence is sent to the Mistral API."
+            privacy_color = "rgba(124, 77, 255, 0.15)"
+            privacy_border = "#7C4DFF"
+        elif mistral_status == "NOT_CONFIGURED":
+            status_color = "#FFA500"
+            status_text = "NOT CONFIGURED (Missing MISTRAL_API_KEY)"
+            provider_label = "Mistral Cloud API"
+            privacy_badge = "CLOUD API — Set MISTRAL_API_KEY environment variable to enable."
+            privacy_color = "rgba(255, 165, 0, 0.15)"
+            privacy_border = "#FFA500"
+        else: # SDK_MISSING
+            status_color = "#FF5252"
+            status_text = "UNAVAILABLE (mistralai SDK missing)"
+            provider_label = "Mistral Cloud API"
+            privacy_badge = "CLOUD API — Install 'mistralai' Python package."
+            privacy_color = "rgba(255, 82, 82, 0.15)"
+            privacy_border = "#FF5252"
+
+    with col_prov2:
+        st.markdown(f"""
+        <div style="background: linear-gradient(135deg, rgba(124,77,255,0.08) 0%, rgba(22,27,34,0.95) 100%); border: 1px solid {privacy_border}; border-radius: 8px; padding: 12px; margin-top: 4px;">
+            <div style="display:flex; justify-content:space-between; align-items:center;">
+                <div>
+                    <span class="badge badge-cyan">MODEL: {model_display}</span>
+                    <span class="badge" style="background-color:{privacy_color}; color:{privacy_border}; border:1px solid {privacy_border};">MODE: {privacy_badge}</span>
+                    <h5 style="color:{privacy_border} !important; margin-top:6px; margin-bottom:2px;">TRACEONE AGENTIC REASONING BACKPLANE</h5>
+                    <p style="font-size:0.8rem; color:#C9D1D9; margin:0;">
+                        <b>Core Policy:</b> <i>"No claim without evidence."</i> TraceONE deterministic tools remain the sole source of truth.
+                    </p>
+                </div>
+                <div style="text-align:right; min-width:180px;">
+                    <div style="font-size:1.0rem; font-weight:700; color:{status_color};">{status_text}</div>
+                    <div style="font-size:0.75rem; color:#8B949E; text-transform:uppercase;">{provider_label}</div>
+                </div>
             </div>
         </div>
-    </div>
-    """, unsafe_allow_html=True)
+        """, unsafe_allow_html=True)
+
+    # ---------------------------------------------------------
+    # FALLBACK PROMPT BANNER IF MISTRAL UNCONFIGURED
+    # ---------------------------------------------------------
+    if current_provider_type == "mistral" and mistral_status != "CONFIGURED":
+        st.warning("⚠️ Mistral Cloud API key is not configured in the environment (`MISTRAL_API_KEY`). Queries will use evidence-grounded fallback responses unless you switch to Local Ollama.")
+        if st.button("🔄 Switch to Qwen3:8B Local (Ollama)", key="switch_to_ollama_fallback_btn"):
+            st.session_state['selected_provider_type'] = "ollama"
+            agent.set_provider("ollama")
+            st.rerun()
+
+    st.markdown("<br>", unsafe_allow_html=True)
 
     # ---------------------------------------------------------
     # DEMO QUERY SHORTCUTS (TEST 1 - TEST 8)
     # ---------------------------------------------------------
-    st.markdown("#### ⚡ Pre-Configured Demo Investigation Queries (Phase M Acceptance Tests)")
+    st.markdown("#### ⚡ Pre-Configured Demo Investigation Queries (Phase M & Expansion Acceptance Tests)")
     
     demo_queries = [
         ("TEST 1", "Why is EMP10194 high risk?"),
@@ -114,7 +187,7 @@ def render_ai_investigator():
                         st.markdown(f"**Visualization:** `{trace.get('visualization_type')}`")
                     with t_col3:
                         st.markdown(f"**Execution Time:** `{trace.get('execution_time_sec')}s`")
-                        st.markdown(f"**LLM Provider:** `{trace.get('llm_provider')}`")
+                        st.markdown(f"**LLM Provider:** `{trace.get('llm_provider')} ({trace.get('model_name')})`")
 
                     st.markdown("---")
                     st.markdown("**Structured Plan JSON:**")
@@ -147,6 +220,8 @@ def render_ai_investigator():
         # Execute Agentic Investigation Pipeline
         with st.chat_message("assistant"):
             with st.spinner("🤖 Agent analyzing request ➔ resolving entities ➔ querying deterministic tools ➔ building evidence package..."):
+                # Ensure active agent provider matches selected UI provider
+                agent.set_provider(st.session_state['selected_provider_type'])
                 response = agent.query(query_to_run)
 
             # Display Answer Text
@@ -167,10 +242,10 @@ def render_ai_investigator():
                     st.markdown(f"**Visualization Type:** `{response.get('visualization_type')}`")
                 with t_col3:
                     st.markdown(f"**Execution Time:** `{response.get('execution_time_sec')}s`")
-                    st.markdown(f"**LLM Provider:** `{response.get('llm_provider')}`")
+                    st.markdown(f"**LLM Provider:** `{response.get('llm_provider')} ({response.get('model_name')})`")
 
                 st.markdown("---")
-                st.markdown("**Structured Query Plan (Generated by Qwen3/Planner):**")
+                st.markdown("**Structured Query Plan:**")
                 st.json(response["plan"])
 
                 st.markdown("**Retrieved Deterministic Evidence Package:**")

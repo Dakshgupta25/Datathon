@@ -1,8 +1,0 @@
-dataset,field,type,missing,valid,invalid
-FIREWALL,src_ip,IP address,1833,15037,13730
-FIREWALL,dst_ip,IP address,1772,15801,13027
-FIREWALL,src_port,Port,3958,23259,3383
-FIREWALL,dst_port,Port,4079,23172,3349
-FIREWALL,bytes_sent,Bytes,3615,23294,3691
-FIREWALL,bytes_received,Bytes,3654,23288,3658
-IAM,source_ip,IP address,1196,10125,9179

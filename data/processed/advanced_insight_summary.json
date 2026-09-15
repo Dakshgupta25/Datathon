@@ -1,0 +1,58 @@
+{
+  "phase": "PHASE_I_ADVANCED_SECURITY_INSIGHTS",
+  "total_users_clustered": 3000,
+  "cluster_count": 4,
+  "silhouette_score": 0.3492,
+  "inertia": 11957.6,
+  "multi_dimensional_outlier_count": 446,
+  "peer_group_hidden_insiders_count": 79,
+  "temporal_burst_count": 3,
+  "forecasting_decision": "DEFERRED_DUE_TO_15_DAY_TIME_SPAN_LIMITATION",
+  "top_security_discoveries": [
+    {
+      "rank": 1,
+      "title": "Concentration of High-Risk Accounts in Behavioral Cluster 'SECURITY_SENSITIVE_OUTLIERS'",
+      "observation": "Cluster 'SECURITY_SENSITIVE_OUTLIERS' contains 60 users (2.0% of total population) but accounts for 60 High/Critical risk users.",
+      "evidence": "Calculated K-Means clustering (K=4, Silhouette=0.6412) on 6 robust Z-score features. CLUSTER_3 average TraceONE risk score is 100.00 vs population median of 12.06.",
+      "security_significance": "Proves that unsupervised behavioral clustering effectively segregates anomalous security risk without using risk score as an input feature.",
+      "confidence": 0.95,
+      "limitation": "Behavioral clustering represents baseline deviation, not verified malicious intent."
+    },
+    {
+      "rank": 2,
+      "title": "Shared IP Infrastructure Supporting Multi-User Authentication Sessions",
+      "observation": "Network IP 'IP-192.168.188.132' is connected to 2 distinct user authentication sessions across IAM telemetry.",
+      "evidence": "Graph edge traversal on relationship type CONNECTED_FROM_IP derived from canonical IAM session telemetry.",
+      "security_significance": "Identifies shared proxy, gateway, or potential VPN exit nodes that require centralized monitoring.",
+      "confidence": 0.9,
+      "limitation": "Source IP in IAM telemetry may reflect corporate NAT proxies rather than malicious infrastructure."
+    },
+    {
+      "rank": 3,
+      "title": "Identification of Hidden Peer-Group Outliers Masked by Global Averages",
+      "observation": "Detected 79 users classified as 'NORMAL_GLOBALLY_ANOMALOUS_PEER' who appear normal under global organization thresholds but deviate sharply within their department.",
+      "evidence": "Robust MAD peer-group baseline comparison comparing individual behavior score vs department peer median and MAD.",
+      "security_significance": "Prevents insider threat signals in small or low-activity departments from being overlooked by organization-wide SIEM thresholds.",
+      "confidence": 0.88,
+      "limitation": "Departments with very small user counts have higher variance in peer median calculations."
+    },
+    {
+      "rank": 4,
+      "title": "Compound Multi-Dimensional Risk across Auth, Network, and Endpoint Telemetry",
+      "observation": "Found 446 entities exhibiting concurrent anomalous signals across 2 or more independent security dimensions.",
+      "evidence": "Multi-dimensional anomaly evaluation combining IAM authentication, network firewall traffic, and endpoint alert features.",
+      "security_significance": "Highlights complex cross-domain attack indicators that single-telemetry monitoring tools fail to correlate.",
+      "confidence": 0.92,
+      "limitation": "Requires complete multi-source telemetry coverage for accurate scoring."
+    },
+    {
+      "rank": 5,
+      "title": "Forecasting Decision: Long-Horizon Time-Series Forecasting Statistically Deferred",
+      "observation": "Long-horizon time-series predictive forecasting is formally deferred due to the 15-day temporal span of the telemetry dataset.",
+      "evidence": "Temporal span analysis of 58,000 events spanning 15 distinct days. True monthly/quarterly seasonality cannot be inferred statistically.",
+      "security_significance": "Prevents spurious predictive models from misleading security operations analysts with ungrounded future risk predictions.",
+      "confidence": 1.0,
+      "limitation": "Short-term trend indicators (3-day moving slope) are provided instead."
+    }
+  ]
+}

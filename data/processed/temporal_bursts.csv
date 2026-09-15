@@ -1,0 +1,4 @@
+burst_id,entity_id,entity_type,burst_start,burst_end,burst_duration_sec,event_count,event_density_per_min,source_diversity_count,burst_category,severity_level
+BURST_0001,EMP11073,USER,2026-09-01 09:59:26,2026-09-01 10:24:26,1500.0,3,0.12,1,AUTHENTICATION_BURST,MEDIUM
+BURST_0002,EMP12901,USER,2026-03-08 00:00:00,2026-03-08 00:00:00,1.0,3,180.0,1,AUTHENTICATION_BURST,MEDIUM
+BURST_0003,WS-12901,HOST,2026-03-08 00:00:00,2026-03-08 00:00:00,1.0,3,180.0,1,AUTHENTICATION_BURST,MEDIUM

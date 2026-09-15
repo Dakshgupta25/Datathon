@@ -45,7 +45,15 @@ EXPECTED_COLUMNS = [
     "mfa_passed",
     "failure_reason",
     "risk_score",
+    "risk_score_raw",
+    "risk_score_numeric",
+    "risk_score_valid",
+    "risk_label",
+    "risk_quality_flag",
     "geo_location",
+    "data_quality_status",
+    "is_imputed",
+    "is_repaired",
 ]
 
 
@@ -209,7 +217,7 @@ def main():
     schema_pass = (
         len(missing_columns) == 0
         and len(unexpected_columns) == 0
-        and len(clean.columns) == 15
+        and len(clean.columns) == 23
     )
 
     print(

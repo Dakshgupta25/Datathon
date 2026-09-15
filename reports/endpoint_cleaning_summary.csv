@@ -1,2 +1,0 @@
-dataset,raw_rows,exact_duplicates_removed,cleaned_rows,final_columns,user_id_invalid,severity_unmapped,status_unmapped,device_criticality_unmapped,detected_timestamp_invalid,resolved_timestamp_invalid,chronology_issues,hostname_invalid,sha256_invalid,resolution_duration_median_used,final_missing_cells,final_duplicate_rows,final_duplicate_alert_ids,missing_text_handling,missing_timestamp_handling,missing_duration_handling
-endpoint,8240,240,8000,17,0,0,0,0,0,0,263,0,799,62.99,0,0,0,Unknown sentinel,Unknown sentinel,Median of valid durations

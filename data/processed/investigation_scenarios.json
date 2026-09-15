@@ -1,0 +1,213 @@
+[
+  {
+    "scenario_id": "SCENARIO-01",
+    "title": "Highest Risk User Investigation",
+    "description": "Deep-dive investigation of top-risk user EMP12418",
+    "target_entity": "EMP12418",
+    "investigation_context": {
+      "entity_id": "EMP12418",
+      "entity_type": "USER",
+      "label": "warda.dua80",
+      "department": "Marketing",
+      "status": "Active",
+      "risk_summary": {
+        "entity_id": "EMP12418",
+        "entity_type": "USER",
+        "username": "warda.dua80",
+        "department": "Marketing",
+        "traceone_risk_score": 100.0,
+        "risk_level": "CRITICAL",
+        "risk_confidence_score": 0.968,
+        "risk_confidence_level": "HIGH",
+        "independent_signal_count": 3,
+        "multi_signal_multiplier": 1.5,
+        "source_iam_risk_indicator": "Unknown",
+        "source_iam_risk_quality": "UNKNOWN",
+        "eligibility_status": "SUFFICIENT_HISTORY",
+        "counter_evidence": "ZERO_MFA_FAILURES_OBSERVED",
+        "primary_hypothesis": "POSSIBLE_CREDENTIAL_COMPROMISE; POSSIBLE_ACCOUNT_TAKEOVER; POSSIBLE_ANOMALOUS_DATA_EXFILTRATION"
+      },
+      "hypothesis": "POSSIBLE_CREDENTIAL_COMPROMISE; POSSIBLE_ACCOUNT_TAKEOVER; POSSIBLE_ANOMALOUS_DATA_EXFILTRATION",
+      "connected_entities_summary": {
+        "outbound_count": 46,
+        "inbound_count": 0
+      },
+      "temporal_sequence_ids": [
+        "SEQ-USR-1340",
+        "SEQ-USR-1341",
+        "SEQ-USR-1342",
+        "SEQ-USR-1343",
+        "SEQ-USR-1344",
+        "SEQ-USR-1345",
+        "SEQ-USR-1346",
+        "SEQ-USR-1347",
+        "SEQ-USR-1348"
+      ],
+      "supporting_evidence_event_ids": [
+        "IAM00005379",
+        "IAM00016535",
+        "IAM00016256",
+        "IAM00017695",
+        "IAM00006785",
+        "IAM00017454",
+        "IAM00002920",
+        "IAM00010358",
+        "IAM00006513",
+        "IAM00009536",
+        "IAM00002899",
+        "IAM00000364",
+        "IAM00004862",
+        "IAM00002739",
+        "IAM00011868",
+        "IAM00010939",
+        "IAM00003498",
+        "IAM00000880",
+        "IAM00004559",
+        "IAM00011178",
+        "IAM00004292",
+        "IAM00000219",
+        "IAM00011147",
+        "IAM00008717",
+        "IAM00001019",
+        "IAM00014181",
+        "IAM00002971",
+        "IAM00014449",
+        "IAM00019939",
+        "IAM00015300",
+        "IAM00010750",
+        "IAM00013725",
+        "IAM00007962",
+        "IAM00015560",
+        "IAM00001904",
+        "IAM00010643",
+        "IAM00014100",
+        "IAM00012428",
+        "IAM00001788",
+        "IAM00013990",
+        "IAM00003877",
+        "IAM00014220",
+        "IAM00007693",
+        "IAM00006107",
+        "IAM00001193",
+        "IAM00002890",
+        "IAM00001819",
+        "IAM00015425",
+        "IAM00012739",
+        "IAM00015973",
+        "IAM00008590",
+        "IAM00005639",
+        "IAM00015391",
+        "IAM00005871",
+        "IAM00012282",
+        "IAM00017976",
+        "IAM00014245",
+        "IAM00014290",
+        "IAM00004914",
+        "IAM00000546",
+        "IAM00006363"
+      ],
+      "investigation_readiness": "READY"
+    }
+  },
+  {
+    "scenario_id": "SCENARIO-02",
+    "title": "High Risk Host Endpoint & Network Investigation",
+    "description": "Investigation of critical risk host WS-10618",
+    "target_entity": "WS-10618",
+    "investigation_context": {
+      "entity_id": "WS-10618",
+      "entity_type": "HOST",
+      "label": "WS-10618",
+      "department": "Unknown",
+      "status": "Managed",
+      "risk_summary": {
+        "entity_id": "WS-10618",
+        "entity_type": "HOST",
+        "username": "Unknown",
+        "department": "Unknown",
+        "traceone_risk_score": 100.0,
+        "risk_level": "CRITICAL",
+        "risk_confidence_score": 0.6095,
+        "risk_confidence_level": "MEDIUM",
+        "independent_signal_count": 3,
+        "multi_signal_multiplier": 1.5,
+        "source_iam_risk_indicator": "Not Applicable",
+        "source_iam_risk_quality": "NOT_APPLICABLE",
+        "eligibility_status": "INSUFFICIENT_TIMESTAMP_QUALITY",
+        "counter_evidence": "LOW_TIMESTAMP_QUALITY",
+        "primary_hypothesis": "POSSIBLE_SUSPICIOUS_ENDPOINT_ACTIVITY; POSSIBLE_ANOMALOUS_NETWORK_TRAFFIC"
+      },
+      "hypothesis": "POSSIBLE_SUSPICIOUS_ENDPOINT_ACTIVITY; POSSIBLE_ANOMALOUS_NETWORK_TRAFFIC",
+      "connected_entities_summary": {
+        "outbound_count": 1,
+        "inbound_count": 1
+      },
+      "temporal_sequence_ids": [],
+      "supporting_evidence_event_ids": [
+        "IAM00007778",
+        "IAM00016982",
+        "IAM00017718",
+        "IAM00010762",
+        "IAM00016279",
+        "IAM00013397"
+      ],
+      "investigation_readiness": "READY"
+    }
+  },
+  {
+    "scenario_id": "SCENARIO-03",
+    "title": "Shared Infrastructure IP Investigation",
+    "description": "Infrastructure correlation for active IP 172.16.217.68",
+    "target_entity": "IP-172.16.217.68",
+    "investigation_context": {
+      "ip_address": "172.16.217.68",
+      "connected_entities_count": 1,
+      "connected_entities": [
+        "SID972275"
+      ]
+    }
+  },
+  {
+    "scenario_id": "SCENARIO-04",
+    "title": "Temporal Sequence Event Chain Investigation",
+    "description": "Sequence event chain for entity EMP12418 (Sequence SEQ-USR-1340)",
+    "target_entity": "SEQ-USR-1340",
+    "investigation_context": {
+      "entity_id": "SEQ-USR-1340",
+      "outbound_connections": [
+        {
+          "edge_id": "EDG-87682",
+          "target": "IAM00008590",
+          "source": "SEQ-USR-1340",
+          "relationship_type": "SEQUENCE_INCLUDES_EVENT",
+          "confidence": "EXACT",
+          "source_dataset": "IAM",
+          "source_record_id": "IAM00008590",
+          "evidence_type": "SEQUENCE_EVENT_STEP"
+        },
+        {
+          "edge_id": "EDG-87683",
+          "target": "IAM00006107",
+          "source": "SEQ-USR-1340",
+          "relationship_type": "SEQUENCE_INCLUDES_EVENT",
+          "confidence": "EXACT",
+          "source_dataset": "IAM",
+          "source_record_id": "IAM00006107",
+          "evidence_type": "SEQUENCE_EVENT_STEP"
+        }
+      ],
+      "inbound_connections": [
+        {
+          "edge_id": "EDG-84925",
+          "target": "SEQ-USR-1340",
+          "source": "EMP12418",
+          "relationship_type": "INVOLVED_IN_SEQUENCE",
+          "confidence": "EXACT",
+          "source_dataset": "temporal_sequences",
+          "source_record_id": "SEQ-USR-1340",
+          "evidence_type": "CHRONOLOGICAL_SEQUENCE_MEMBER"
+        }
+      ]
+    }
+  }
+]

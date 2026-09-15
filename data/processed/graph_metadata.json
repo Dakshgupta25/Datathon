@@ -1,0 +1,26 @@
+{
+  "total_nodes": 138931,
+  "total_edges": 79224,
+  "node_distribution": {
+    "EVENT": 38873,
+    "IP": 38370,
+    "SESSION": 36433,
+    "RISK_ASSESSMENT": 11413,
+    "HOST": 8413,
+    "USER": 3000,
+    "TEMPORAL_SEQUENCE": 2412,
+    "DEPARTMENT": 17
+  },
+  "edge_distribution": {
+    "SEQUENCE_INCLUDES_EVENT": 25863,
+    "SUPPORTED_BY_EVIDENCE": 15000,
+    "HAS_RISK_ASSESSMENT": 11413,
+    "AUTHENTICATED_VIA": 10000,
+    "CONNECTED_FROM_IP": 4915,
+    "COMMUNICATED_WITH_IP": 4824,
+    "ASSOCIATED_WITH_HOST": 3040,
+    "BELONGS_TO": 3000,
+    "INVOLVED_IN_SEQUENCE": 1169
+  },
+  "provenance_preserved": true
+}

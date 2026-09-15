@@ -1,0 +1,5 @@
+cluster_id,cluster_label,population_count,population_percent,avg_failed_login_z,avg_auth_fail_rate_z,avg_off_hours_z,avg_endpoint_alert_z,avg_source_ip_z,avg_host_z,avg_risk_score,high_risk_count,dominant_features
+CLUSTER_0,IRREGULAR_AUTHENTICATION_BEHAVIOR,884,29.47,0.4899,1.0818,-0.6135,0.174,-0.7203,-0.0803,11.47,0,Moderate Auth Failure & Off-Hours Deviations
+CLUSTER_1,NORMAL_BUSINESS_ACTIVITY,1198,39.93,-0.6925,-0.8197,-0.59,0.1539,-0.6886,-0.0893,4.29,0,Standard Baseline Activity across all features
+CLUSTER_2,IRREGULAR_AUTHENTICATION_BEHAVIOR,858,28.6,0.717,0.176,1.0495,0.2442,1.0062,-0.0688,22.28,18,Moderate Auth Failure & Off-Hours Deviations
+CLUSTER_3,SECURITY_SENSITIVE_OUTLIERS,60,2.0,13.0548,0.0816,18.7972,0.2661,18.6525,-0.0667,100.0,60,"Extremely High Auth Failures, Off-Hours & IP Diversity"

@@ -176,25 +176,18 @@ def render_ai_investigator():
                 st.plotly_chart(msg["figure"], use_container_width=True)
             
             if "trace" in msg and msg["trace"]:
-                with st.expander("🔍 Observability Pipeline Trace (Plan ➔ Tools ➔ Evidence ➔ Provenance)", expanded=False):
+                with st.expander("▸ Investigation details", expanded=False):
                     trace = msg["trace"]
-                    t_col1, t_col2, t_col3 = st.columns(3)
+                    plan_info = trace.get("plan", {})
+                    t_col1, t_col2 = st.columns(2)
                     with t_col1:
-                        st.markdown(f"**Intent:** `{trace['plan'].get('intent')}`")
-                        st.markdown(f"**Entity ID:** `{trace['plan'].get('entity_id')}`")
+                        st.markdown(f"**Intent:** `{plan_info.get('intent')}`")
+                        st.markdown(f"**Entity ID:** `{plan_info.get('entity_id') or 'null (Global query)'}`")
+                        st.markdown(f"**Tools:** `{', '.join(plan_info.get('tools', []))}`")
                     with t_col2:
-                        st.markdown(f"**Tools Executed:** `{', '.join(trace['plan'].get('tools', []))}`")
                         st.markdown(f"**Visualization:** `{trace.get('visualization_type')}`")
-                    with t_col3:
-                        st.markdown(f"**Execution Time:** `{trace.get('execution_time_sec')}s`")
-                        st.markdown(f"**LLM Provider:** `{trace.get('llm_provider')} ({trace.get('model_name')})`")
-
-                    st.markdown("---")
-                    st.markdown("**Structured Plan JSON:**")
-                    st.json(trace['plan'])
-
-                    st.markdown("**Evidence Package Summary:**")
-                    st.json(trace['evidence_package'])
+                        st.markdown(f"**Data Source:** `user_risk_scores.csv & canonical_events.csv`")
+                        st.markdown(f"**Provider:** `{trace.get('llm_provider')} ({trace.get('model_name')})` (`{trace.get('execution_time_sec')}s`)")
 
     # ---------------------------------------------------------
     # QUERY INPUT PROCESSING
@@ -231,25 +224,18 @@ def render_ai_investigator():
             if response.get("figure") is not None:
                 st.plotly_chart(response["figure"], use_container_width=True)
 
-            # Display Observability Trace Expander
-            with st.expander("🔍 Observability Pipeline Trace (Plan ➔ Tools ➔ Evidence ➔ Provenance)", expanded=True):
-                t_col1, t_col2, t_col3 = st.columns(3)
+            # Display Observability Trace Expander (Compact metadata, collapsed by default)
+            with st.expander("▸ Investigation details", expanded=False):
+                plan_info = response.get("plan", {})
+                t_col1, t_col2 = st.columns(2)
                 with t_col1:
-                    st.markdown(f"**Intent:** `{response['plan'].get('intent')}`")
-                    st.markdown(f"**Resolved Entity:** `{response['plan'].get('entity_id')}`")
+                    st.markdown(f"**Intent:** `{plan_info.get('intent')}`")
+                    st.markdown(f"**Entity ID:** `{plan_info.get('entity_id') or 'null (Global query)'}`")
+                    st.markdown(f"**Tools:** `{', '.join(plan_info.get('tools', []))}`")
                 with t_col2:
-                    st.markdown(f"**Tools Executed:** `{', '.join(response['plan'].get('tools', []))}`")
-                    st.markdown(f"**Visualization Type:** `{response.get('visualization_type')}`")
-                with t_col3:
-                    st.markdown(f"**Execution Time:** `{response.get('execution_time_sec')}s`")
-                    st.markdown(f"**LLM Provider:** `{response.get('llm_provider')} ({response.get('model_name')})`")
-
-                st.markdown("---")
-                st.markdown("**Structured Query Plan:**")
-                st.json(response["plan"])
-
-                st.markdown("**Retrieved Deterministic Evidence Package:**")
-                st.json(response["evidence_package"])
+                    st.markdown(f"**Visualization:** `{response.get('visualization_type')}`")
+                    st.markdown(f"**Data Source:** `user_risk_scores.csv & canonical_events.csv`")
+                    st.markdown(f"**Provider:** `{response.get('llm_provider')} ({response.get('model_name')})` (`{response.get('execution_time_sec')}s`)")
 
             # Append Assistant Message to Chat History
             st.session_state['ai_chat_history'].append({

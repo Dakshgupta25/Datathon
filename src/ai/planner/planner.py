@@ -21,10 +21,32 @@ class QueryPlanner:
         query_clean = user_query.strip()
         query_lower = query_clean.lower()
 
+        # Extract explicit entity present in query text
+        extracted_entity = self._extract_entity_id(query_clean)
+
+        # Resolve context entity only if query is a contextual follow-up
+        context_entity = self._resolve_context_entity(query_lower, extracted_entity, active_context_entity)
+
+        target_entity = extracted_entity or context_entity
+
         # Fast Deterministic Intent & Entity Extractor Pass
-        # 1. Peer comparison
-        if "peer" in query_lower or "compare" in query_lower or "department" in query_lower:
-            target_entity = self._extract_entity_id(query_clean) or active_context_entity
+        # 1. Critical Users / High Risk Entities / Global Aggregations (Check before peer comparison)
+        if "critical" in query_lower or "high risk" in query_lower or "high-risk" in query_lower or "anomalous users" in query_lower or "all critical" in query_lower:
+            if not target_entity:
+                filters = {"risk_level": "CRITICAL"}
+                if "department" in query_lower or "departments" in query_lower or "by department" in query_lower:
+                    filters["group_by"] = "department"
+                return StructuredQueryPlan(
+                    intent="find_high_risk_entities",
+                    entity_type="user",
+                    entity_id=None,
+                    filters=filters,
+                    tools=["high_risk_entities"],
+                    visualization="bar_chart"
+                )
+
+        # 2. Peer comparison (Requires explicit peer/compare keywords)
+        if "peer" in query_lower or "compare" in query_lower or "peer comparison" in query_lower:
             return StructuredQueryPlan(
                 intent="peer_comparison",
                 entity_type="user" if target_entity else None,
@@ -33,9 +55,8 @@ class QueryPlanner:
                 visualization="bar_chart"
             )
 
-        # 2. Shared IP / Graph / Connections
+        # 3. Shared IP / Graph / Connections
         if "shared ip" in query_lower or "same ip" in query_lower or "connected" in query_lower or "graph" in query_lower or "relationship" in query_lower:
-            target_entity = self._extract_entity_id(query_clean) or active_context_entity
             return StructuredQueryPlan(
                 intent="analyze_shared_ip" if "ip" in query_lower else "graph_relationship",
                 entity_type="user" if target_entity else None,
@@ -44,9 +65,8 @@ class QueryPlanner:
                 visualization="graph"
             )
 
-        # 3. Temporal Sequence / Burst / Timeline
+        # 4. Temporal Sequence / Burst / Timeline
         if "sequence" in query_lower or "timeline" in query_lower or "burst" in query_lower or "followed by" in query_lower:
-            target_entity = self._extract_entity_id(query_clean) or active_context_entity
             return StructuredQueryPlan(
                 intent="analyze_temporal_sequence",
                 entity_type="user" if target_entity else None,
@@ -55,7 +75,7 @@ class QueryPlanner:
                 visualization="timeline"
             )
 
-        # 4. Data Quality / Limitations / Trust
+        # 5. Data Quality / Limitations / Trust
         if "data quality" in query_lower or "limitation" in query_lower or "trust" in query_lower or "missing" in query_lower or "timestamp" in query_lower:
             return StructuredQueryPlan(
                 intent="data_quality_question",
@@ -65,21 +85,7 @@ class QueryPlanner:
                 visualization="table"
             )
 
-        # 5. Critical Users by Department / High Risk Entities
-        if "critical" in query_lower or "high risk" in query_lower or "anomalous" in query_lower:
-            target_entity = self._extract_entity_id(query_clean)
-            if not target_entity:
-                return StructuredQueryPlan(
-                    intent="find_high_risk_entities",
-                    entity_type="user",
-                    entity_id=None,
-                    filters={"risk_level": "CRITICAL"},
-                    tools=["high_risk_entities", "cluster_profile"],
-                    visualization="bar_chart"
-                )
-
         # 6. Entity Investigation / Why High Risk / Behavioral Anomalies
-        target_entity = self._extract_entity_id(query_clean) or active_context_entity
         if target_entity:
             return StructuredQueryPlan(
                 intent="investigate_entity",
@@ -91,7 +97,7 @@ class QueryPlanner:
 
         # LLM Reasoning Fallback for Complex Intent Parsing
         try:
-            prompt = f"Parse the user security investigation query into a query plan JSON:\nQuery: \"{user_query}\"\nContext Entity: {active_context_entity}"
+            prompt = f"Parse the user security investigation query into a query plan JSON:\nQuery: \"{user_query}\"\nContext Entity: {context_entity}"
             schema_desc = json.dumps({
                 "intent": "one of " + ", ".join(SUPPORTED_INTENTS),
                 "entity_type": "user or host or null",
@@ -104,7 +110,7 @@ class QueryPlanner:
                 return StructuredQueryPlan(
                     intent=plan_dict.get("intent", "general_security_summary"),
                     entity_type=plan_dict.get("entity_type"),
-                    entity_id=plan_dict.get("entity_id") or active_context_entity,
+                    entity_id=plan_dict.get("entity_id") or context_entity,
                     tools=plan_dict.get("tools", ["user_risk"]),
                     visualization=plan_dict.get("visualization", "text_summary")
                 )
@@ -114,10 +120,31 @@ class QueryPlanner:
         return StructuredQueryPlan(
             intent="general_security_summary",
             entity_type=None,
-            entity_id=active_context_entity,
+            entity_id=context_entity,
             tools=["user_risk"],
             visualization="text_summary"
         )
+
+    def _resolve_context_entity(self, query_lower: str, extracted_entity: Optional[str], active_context_entity: Optional[str]) -> Optional[str]:
+        """Resolve previous entity context ONLY when query explicitly references it via contextual language."""
+        if extracted_entity:
+            return None
+        if not active_context_entity:
+            return None
+
+        # Contextual indicators that refer to the previously investigated entity
+        context_indicators = [
+            "his", "her", "their", "its",
+            "this user", "that user", "this host", "that host", "that ip", "this ip",
+            "that entity", "this entity", "that sequence",
+            "he ", "him ", "she ",
+            "same ip", "connected to that", "what about", "how about", "tell me more"
+        ]
+
+        if any(ind in query_lower for ind in context_indicators):
+            return active_context_entity
+
+        return None
 
     def _extract_entity_id(self, text: str) -> Optional[str]:
         """Extract user ID (EMP...), host ID (VDR.../WS.../LPT...), IP, sequence ID, or custom entity tokens from text."""
@@ -152,5 +179,6 @@ class QueryPlanner:
             return m_ip.group(1)
 
         return None
+
 
 

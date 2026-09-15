@@ -54,19 +54,27 @@ class TraceONEAgent:
         # 1. Prompt Injection Defense & Input Sanitization
         clean_user_text = PromptDefense.sanitize_input(user_text)
         
-        # Use session entity if follow-up (e.g. "what about his peers?")
+        # Use session entity if provided, otherwise check active context
         context_entity = session_entity or self.active_context_entity
 
         # 2. Query Planning (Parse Intent & Tools)
         plan = self.planner.plan(clean_user_text, active_context_entity=context_entity)
         
-        # Update active context entity if extracted
+        # Update active context entity ONLY if an entity was targeted in the plan
         if plan.entity_id:
             self.active_context_entity = plan.entity_id
-        target_entity = plan.entity_id or context_entity
+        target_entity = plan.entity_id
 
         # 3. Entity Resolution
-        entity_res = self.resolver.resolve(target_entity) if target_entity else {"status": "NOT_FOUND", "message": "No query entity specified."}
+        if target_entity:
+            entity_res = self.resolver.resolve(target_entity)
+        else:
+            entity_res = {
+                "status": "RESOLVED",
+                "entity_type": plan.entity_type,
+                "entity_id": None,
+                "message": "Global telemetry query (no entity targeted)."
+            }
 
         # 4. Deterministic Tool Execution
         tool_results = {}
@@ -89,10 +97,10 @@ class TraceONEAgent:
                 tool_results["provenance"] = self.toolkit.get_provenance(target_entity)
             elif tool_name in ["data_quality", "data_trust"]:
                 tool_results["data_quality_context"] = self.toolkit.get_data_quality_context()
-            elif tool_name == "high_risk_entities":
+            elif tool_name in ["high_risk_entities", "get_high_risk_entities"]:
                 tool_results["high_risk_entities"] = self.toolkit.get_high_risk_entities(
-                    department=plan.filters.get("department"),
-                    risk_level=plan.filters.get("risk_level", "CRITICAL")
+                    department=plan.filters.get("department") if plan.filters else None,
+                    risk_level=plan.filters.get("risk_level", "CRITICAL") if plan.filters else "CRITICAL"
                 )
 
         # Ensure minimal evidence if no tools specified
@@ -120,9 +128,9 @@ Format into clear sections:
 
         answer_text = self.llm.generate(generation_prompt, system_prompt=SYSTEM_SAFETY_PROMPT)
 
-        # Fallback formatting if Ollama/Mistral is unavailable, error, or empty
-        if "OLLAMA_UNAVAILABLE_ERROR" in answer_text or "MISTRAL_UNAVAILABLE_ERROR" in answer_text or not str(answer_text).strip():
-            answer_text = self._build_deterministic_answer_fallback(clean_user_text, evidence_package, error_context=answer_text)
+        # Fallback formatting if Ollama/Mistral is unavailable, error, rate limited (429), or empty
+        if any(err_kw in str(answer_text) for err_kw in ["UNAVAILABLE_ERROR", "429", "Rate Limited", "Rate limit"]) or not str(answer_text).strip():
+            answer_text = self._build_deterministic_answer_fallback(clean_user_text, evidence_package, error_context=str(answer_text))
 
         # 7. Visualization Selection
         plotly_fig = VisualizationSelector.render_spec(plan.visualization, evidence_package)
@@ -153,36 +161,40 @@ Format into clear sections:
         }
 
     def _build_deterministic_answer_fallback(self, query: str, package: dict, error_context: str = None) -> str:
-        """Deterministic fallback answer generator when LLM is offline or timed out."""
+        """Deterministic fallback answer generator when LLM is offline, rate-limited, or timed out."""
         entity = package.get("entity", {})
         risk = package.get("risk_assessment", {})
         peer = package.get("peer_comparison", {})
         temporal = package.get("temporal_sequences", {})
+        high_risk = package.get("high_risk_list", [])
 
         status = entity.get("status", "RESOLVED")
-        requested_id = entity.get("entity_id") or "N/A"
+        requested_id = entity.get("entity_id")
 
         error_notice = ""
-        if error_context and "UNAVAILABLE_ERROR" in error_context:
-            error_notice = f"\n> ⚠️ **Provider Notice**: {error_context}\n\n"
+        if error_context and any(err_kw in str(error_context) for err_kw in ["UNAVAILABLE_ERROR", "429", "Rate Limited", "Rate limit"]):
+            clean_err = error_context.strip()
+            error_notice = f"> ⚠️ **Provider Unavailable Notice**: `{clean_err}`. Displaying deterministic TraceONE analytics answer.\n\n"
 
-        if status == "NOT_FOUND" or risk.get("found") is False:
+        # Explicit NOT_FOUND case (User requested an entity that does not exist in canonical indexes)
+        if status == "NOT_FOUND" or (requested_id and risk.get("found") is False):
             return f"""{error_notice}### 🛡️ TraceONE Evidence-Grounded Investigation Summary
 
 **Executive Summary:**
-No matching telemetry or entity record was found for requested entity **`{requested_id}`** in canonical TraceONE indexes.
+No matching telemetry or entity record was found for requested entity **`{requested_id or 'N/A'}`** in canonical TraceONE indexes.
 
 **Observed Evidence & Status:**
 - Zero matching records exist for this condition in `user_risk_scores.csv` or `canonical_events.csv`.
 - Status: **NO_MATCHING_TELEMETRY_FOUND**.
 
 **Counter-Evidence & Uncertainty:**
-- The absence of telemetry records for **`{requested_id}`** indicates this entity is unmonitored or nonexistent in the enterprise evaluation dataset.
+- The absence of telemetry records for **`{requested_id or 'N/A'}`** indicates this entity is unmonitored or nonexistent in the enterprise evaluation dataset.
 
 **Data Trust & Limitations:**
 - Analysis grounded in fixed telemetry window `2026-08-01 → 2026-08-15` with 82.9% valid timestamp coverage.
 """
 
+        # Ambiguous case
         if status == "AMBIGUOUS":
             candidates = entity.get("candidates", [])
             cand_str = ", ".join([f"`{c.get('id')}` ({c.get('dept', 'N/A')})" for c in candidates]) if candidates else "Multiple entities"
@@ -198,6 +210,34 @@ The query **"{query}"** matched multiple possible candidate entities in canonica
 Please refine your search query using an exact Entity ID (e.g., `EMP10194`).
 """
 
+        # Global High Risk Aggregation Fallback (No single entity requested)
+        if high_risk or requested_id is None:
+            total_critical = len(high_risk)
+            dept_counts = {}
+            for item in high_risk:
+                d = item.get("department", "Unknown")
+                dept_counts[d] = dept_counts.get(d, 0) + 1
+
+            dept_summary = "\n".join([f"- **{d}**: {c} critical user(s)" for d, c in dept_counts.items()]) if dept_counts else "- No critical users identified."
+
+            return f"""{error_notice}### 🛡️ TraceONE Evidence-Grounded Investigation Summary
+
+**Executive Summary:**
+Identified **{total_critical}** critical-risk entity record(s) across enterprise departments in canonical TraceONE risk indexes.
+
+**Critical Users by Department:**
+{dept_summary}
+
+**Observed Telemetry Evidence:**
+- Filter Applied: `risk_level = CRITICAL`
+- Aggregation Scope: Departmental breakdown from `user_risk_scores.csv`
+- Primary Data Source: `data/processed/user_risk_scores.csv`
+
+**Data Trust & Limitations:**
+- Grounded in fixed telemetry window `2026-08-01 → 2026-08-15` with 82.9% valid timestamp coverage (17.1% unknown timestamps preserved).
+"""
+
+        # Single Entity Investigation Fallback
         e_id = entity.get("entity_id", "EMP10194")
         r_score = risk.get("traceone_risk_score", 100.0)
         r_lvl = risk.get("risk_level", "CRITICAL")

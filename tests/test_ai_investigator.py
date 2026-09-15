@@ -59,15 +59,135 @@ def test_query_planner_intents():
 
     plan2 = planner.plan("Compare EMP10194 with R&D peers.")
     assert plan2.intent == "peer_comparison"
+    assert plan2.entity_id == "EMP10194"
     assert "peer_comparison" in plan2.tools
 
     plan3 = planner.plan("Which users share the same IP as EMP10194?")
     assert plan3.intent == "analyze_shared_ip"
+    assert plan3.entity_id == "EMP10194"
     assert "shared_ip" in plan3.tools
 
     plan4 = planner.plan("What are the data quality limitations affecting this investigation?")
     assert plan4.intent == "data_quality_question"
+    assert plan4.entity_id is None
     assert "data_quality" in plan4.tools
+
+
+def test_issue7_query_classification_regression():
+    """ISSUE 7 — Test exact classification for all 8 mandatory benchmark queries."""
+    planner = QueryPlanner(MockProvider())
+
+    # 1. "Show critical users by department." -> find_high_risk_entities
+    p1 = planner.plan("Show critical users by department.")
+    assert p1.intent == "find_high_risk_entities"
+    assert p1.entity_id is None
+    assert p1.filters.get("risk_level") == "CRITICAL"
+    assert p1.filters.get("group_by") == "department"
+    assert "high_risk_entities" in p1.tools
+    assert p1.visualization == "bar_chart"
+
+    # 2. "Why is EMP10194 high risk?" -> investigate_entity
+    p2 = planner.plan("Why is EMP10194 high risk?")
+    assert p2.intent == "investigate_entity"
+    assert p2.entity_id == "EMP10194"
+
+    # 3. "Compare EMP10194 with R&D peers." -> peer_comparison
+    p3 = planner.plan("Compare EMP10194 with R&D peers.")
+    assert p3.intent == "peer_comparison"
+    assert p3.entity_id == "EMP10194"
+
+    # 4. "What about his peers?" -> peer_comparison + inherited context
+    p4 = planner.plan("What about his peers?", active_context_entity="EMP10194")
+    assert p4.intent == "peer_comparison"
+    assert p4.entity_id == "EMP10194"
+
+    # 5. "Show all critical users." -> find_high_risk_entities
+    p5 = planner.plan("Show all critical users.")
+    assert p5.intent == "find_high_risk_entities"
+    assert p5.entity_id is None
+    assert p5.filters.get("risk_level") == "CRITICAL"
+
+    # 6. "How many critical users are there?" -> find_high_risk_entities
+    p6 = planner.plan("How many critical users are there?")
+    assert p6.intent == "find_high_risk_entities"
+    assert p6.entity_id is None
+    assert p6.filters.get("risk_level") == "CRITICAL"
+
+    # 7. "Which departments have the most high-risk users?" -> find_high_risk_entities
+    p7 = planner.plan("Which departments have the most high-risk users?")
+    assert p7.intent == "find_high_risk_entities"
+    assert p7.entity_id is None
+
+    # 8. "Show the temporal sequence involving EMP10194." -> analyze_temporal_sequence
+    p8 = planner.plan("Show the temporal sequence involving EMP10194.")
+    assert p8.intent == "analyze_temporal_sequence"
+    assert p8.entity_id == "EMP10194"
+    assert p8.visualization == "timeline"
+
+
+def test_issue3_context_leakage_prevention():
+    """ISSUE 3 — Verify standalone queries never inherit previous context entity EMP10194."""
+    agent = TraceONEAgent(provider_override=MockProvider())
+    
+    # First query establishes context
+    res1 = agent.query("Why is EMP10194 high risk?")
+    assert agent.active_context_entity == "EMP10194"
+
+    # Standalone global query must NOT inherit context
+    res2 = agent.query("Show critical users by department.")
+    assert res2["plan"]["intent"] == "find_high_risk_entities"
+    assert res2["plan"]["entity_id"] is None
+    assert "EMP10194" not in res2["answer"]
+    assert res2["evidence_package"]["entity"]["entity_id"] is None
+
+
+def test_issue4_null_entity_handling():
+    """ISSUE 4 — Verify entity_id is null for global queries, NOT_FOUND only for invalid entities."""
+    resolver = EntityResolver()
+    
+    # Global query -> None entity_id, status RESOLVED
+    res_null = resolver.resolve(None)
+    assert res_null["status"] == "RESOLVED"
+    assert res_null["entity_id"] is None
+
+    # Unknown explicit entity -> status NOT_FOUND
+    res_invalid = resolver.resolve("EMP99999")
+    assert res_invalid["status"] == "NOT_FOUND"
+    assert res_invalid["entity_id"] == "EMP99999"
+
+
+def test_issue5_mistral_429_fallback():
+    """ISSUE 5 — Verify 429 rate limit error falls back gracefully without false NO_MATCHING_TELEMETRY."""
+    class RateLimitedProvider(MockProvider):
+        def generate(self, prompt, system_prompt=None):
+            return "[MISTRAL_UNAVAILABLE_ERROR: 429 Rate Limited - Quota exceeded]"
+
+    agent = TraceONEAgent(provider_override=RateLimitedProvider())
+    res = agent.query("Show critical users by department.")
+
+    assert "Provider Unavailable Notice" in res["answer"]
+    assert "NO_MATCHING_TELEMETRY" not in res["answer"]
+    assert res["plan"]["intent"] == "find_high_risk_entities"
+    assert res["figure"] is not None
+    assert len(res["evidence_package"].get("high_risk_list", [])) > 0
+
+
+def test_issue6_provider_consistency():
+    """ISSUE 6 — Verify different providers produce identical underlying deterministic evidence and plans."""
+    agent_mock = TraceONEAgent(provider_override=MockProvider())
+    res_mock = agent_mock.query("Show critical users by department.")
+
+    class RateLimitedProvider(MockProvider):
+        def generate(self, prompt, system_prompt=None):
+            return "MISTRAL_UNAVAILABLE_ERROR: 429"
+
+    agent_fallback = TraceONEAgent(provider_override=RateLimitedProvider())
+    res_fallback = agent_fallback.query("Show critical users by department.")
+
+    assert res_mock["plan"]["intent"] == res_fallback["plan"]["intent"] == "find_high_risk_entities"
+    assert res_mock["plan"]["entity_id"] == res_fallback["plan"]["entity_id"] == None
+    assert res_mock["evidence_package"]["high_risk_list"] == res_fallback["evidence_package"]["high_risk_list"]
+
 
 
 def test_entity_resolver():

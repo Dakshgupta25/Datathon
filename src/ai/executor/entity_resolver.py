@@ -23,13 +23,18 @@ class EntityResolver:
         self.host_df = load_host_risk_scores()
         self.seq_df = load_temporal_sequences()
 
-    def resolve(self, query_term: str) -> dict:
+    def resolve(self, query_term: Optional[str]) -> dict:
         """
         Resolve an ambiguous or partial entity query string.
         Returns a dict with status: 'RESOLVED', 'AMBIGUOUS', or 'NOT_FOUND'.
         """
-        if not query_term:
-            return {"status": "NOT_FOUND", "message": "No query entity specified."}
+        if not query_term or str(query_term).strip().upper() in ["NONE", "NULL", "N/A"]:
+            return {
+                "status": "RESOLVED",
+                "entity_type": None,
+                "entity_id": None,
+                "message": "Global telemetry query (no specific entity targeted)."
+            }
 
         clean_term = str(query_term).strip().upper()
 
@@ -98,5 +103,6 @@ class EntityResolver:
 
         return {
             "status": "NOT_FOUND",
+            "entity_id": str(query_term).strip().upper() if query_term else None,
             "message": f"No matching entity found in canonical indexes for '{query_term}'."
         }

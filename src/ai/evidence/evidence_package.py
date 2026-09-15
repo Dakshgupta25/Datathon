@@ -43,10 +43,11 @@ class EvidencePackageBuilder:
         high_risk = package.get("high_risk_list", [])
 
         status = entity.get("status", "RESOLVED")
+        target_id = entity.get("entity_id")
 
-        if status == "NOT_FOUND" or risk.get("found") is False:
+        if status == "NOT_FOUND" or (target_id and risk.get("found") is False):
             return f"""=== TRACEONE EVIDENCE PACKAGE (AUTHORITATIVE DETERMINISTIC DATA) ===
-Target Entity: {entity.get('entity_id', 'N/A')}
+Target Entity: {target_id or 'N/A'}
 Entity Resolution Status: NOT_FOUND
 Message: No matching telemetry or entity record was found in canonical indexes.
 Evidence Available: NONE (Zero telemetry events exist for this condition).
@@ -60,9 +61,10 @@ Candidates Matched: {entity.get('candidates', [])}
 Instruction: Ask user for clarification among candidate entities. Do NOT arbitrarily guess an entity.
 === END OF EVIDENCE PACKAGE ==="""
 
+        entity_disp = f"{target_id} (Type: {entity.get('entity_type', 'N/A')})" if target_id else "Global Telemetry Query (No Specific Entity Targeted)"
         lines = [
             "=== TRACEONE EVIDENCE PACKAGE (AUTHORITATIVE DETERMINISTIC DATA) ===",
-            f"Target Entity: {entity.get('entity_id', 'N/A')} (Type: {entity.get('entity_type', 'N/A')}, Status: {status})",
+            f"Target Entity Context: {entity_disp} [Status: {status}]",
             f"Assessed Risk Score: {risk.get('traceone_risk_score', 'N/A')} / 100 ({risk.get('risk_level', 'LOW')})",
             f"Evidence Confidence: {risk.get('risk_confidence_level', 'HIGH')} ({risk.get('risk_confidence_score', 0.95)})",
             f"Primary Threat Hypothesis: {risk.get('primary_hypothesis', 'N/A')}",
@@ -76,7 +78,7 @@ Instruction: Ask user for clarification among candidate entities. Do NOT arbitra
         ]
 
         if high_risk:
-            lines.append(f"High Risk Entity Summary (Top {len(high_risk)}): {high_risk[:5]}")
+            lines.append(f"High Risk Entity Summary (Top {len(high_risk)}): {high_risk[:10]}")
 
         lines.append("=== END OF EVIDENCE PACKAGE ===")
         return "\n".join(lines)

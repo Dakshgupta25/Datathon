@@ -13,7 +13,7 @@ from src.ai.llm.provider import LLMProvider
 class MistralProvider(LLMProvider):
 
     def __init__(self, api_key: str = None, model: str = None, timeout: int = None):
-        self.api_key = (api_key if api_key is not None else AIConfig.MISTRAL_API_KEY).strip()
+        self.api_key = (api_key if api_key is not None else AIConfig.get_mistral_key()).strip()
         self.model = model or AIConfig.MISTRAL_MODEL or "mistral-small-latest"
         self.timeout = timeout or AIConfig.TIMEOUT
         self._client = None

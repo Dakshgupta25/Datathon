@@ -10,6 +10,7 @@ from src.dashboard.data.loader import (
     load_user_risk_scores,
     load_host_risk_scores,
     load_user_clusters,
+    load_canonical_events,
     load_temporal_sequences,
     load_why_flagged_explanations,
     load_security_hypotheses,
@@ -119,6 +120,23 @@ class TestInvestigationCenter(unittest.TestCase):
         self.assertIn("No MFA failure was observed in the available telemetry", code)
         self.assertNotIn("confirming MFA controls", code)
         self.assertNotIn("Contribution Weight (%)", code)
+
+    def test_17_timeline_timestamp_column_resolution(self):
+        """ISSUE 23 — Verify timeline handles event_timestamp, timestamp, and empty events without traceback."""
+        app_path = Path(__file__).resolve().parent.parent / "app.py"
+        with open(app_path, "r", encoding="utf-8") as f:
+            code = f.read()
+        self.assertIn("time_col = \"event_timestamp\"", code)
+        self.assertIn("time_col = \"timestamp\"", code)
+        self.assertIn("No valid timestamped events available", code)
+
+        # Test column resolution logic on canonical events dataframe
+        events = load_canonical_events()
+        self.assertIsInstance(events, pd.DataFrame)
+        time_col = "event_timestamp" if "event_timestamp" in events.columns else "timestamp" if "timestamp" in events.columns else None
+        self.assertIsNotNone(time_col)
+        self.assertIn(time_col, events.columns)
+
 
 if __name__ == "__main__":
     unittest.main()

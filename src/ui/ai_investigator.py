@@ -1,7 +1,6 @@
 """
 TraceONE — AI Investigator Module UI
-Phase M & Phase Expansion: Agentic Graph AI / AI Investigator Interface
-Renders evidence-first natural language investigation interface backed by Qwen3:8B / Ollama or Mistral Cloud API and TraceONE tools.
+Evidence-grounded natural language investigation interface backed by Qwen3:8B / Ollama or Mistral Cloud API and TraceONE tools.
 """
 
 import streamlit as st
@@ -23,8 +22,8 @@ def render_ai_investigator():
     # ---------------------------------------------------------
     # HEADER & TITLE
     # ---------------------------------------------------------
-    st.markdown('<div class="traceone-title">🤖 TRACEONE AI INVESTIGATOR</div>', unsafe_allow_html=True)
-    st.markdown('<div class="traceone-tagline">Evidence-First Agentic Threat Reasoning & Natural Language Querying</div>', unsafe_allow_html=True)
+    st.markdown('<div class="traceone-title">TRACEONE / AI INVESTIGATOR</div>', unsafe_allow_html=True)
+    st.markdown('<div class="traceone-subtitle">Evidence-Grounded AI Security Assistant & Query Copilot</div>', unsafe_allow_html=True)
 
     # Initialize Agent in Session State
     if 'ai_agent' not in st.session_state:
@@ -37,89 +36,72 @@ def render_ai_investigator():
         st.session_state['ai_chat_history'] = []
 
     # Initialize Provider Choice
-    if 'selected_provider_type' not in st.session_state:
-        st.session_state['selected_provider_type'] = AIConfig.LLM_PROVIDER if AIConfig.LLM_PROVIDER in ["ollama", "mistral"] else "ollama"
+    # Initialize Provider Choice
+    ollama_online = OllamaProvider().check_health()
+    has_mistral_key = bool(AIConfig.get_mistral_key())
 
-    # ---------------------------------------------------------
-    # MODEL & PROVIDER SELECTOR TOOLBAR
-    # ---------------------------------------------------------
-    col_prov1, col_prov2 = st.columns([1, 2])
+    if 'selected_provider_type' not in st.session_state:
+        if has_mistral_key or not ollama_online:
+            st.session_state['selected_provider_type'] = "mistral"
+        else:
+            st.session_state['selected_provider_type'] = "ollama"
+
+    agent.set_provider(st.session_state['selected_provider_type'])
+
+    # Provider Toolbar options
+    qwen_option = "Qwen3:8B (Local Ollama)" if ollama_online else "Qwen3:8B (Local only)"
+    mistral_option = "Mistral (Cloud API)"
+
+    provider_options = [qwen_option, mistral_option]
+    default_index = 1 if st.session_state['selected_provider_type'] == "mistral" else 0
+
+    col_prov1, col_prov2 = st.columns([2, 3])
 
     with col_prov1:
-        st.markdown("##### ⚙️ Select AI Model Provider")
         provider_choice = st.radio(
-            "Model Provider",
-            options=["Qwen3:8B — Local Ollama", "Mistral — Cloud API"],
-            index=0 if st.session_state['selected_provider_type'] == "ollama" else 1,
+            "Select AI Model Provider",
+            options=provider_options,
+            index=default_index,
             label_visibility="collapsed",
-            key="provider_radio"
+            key="provider_radio",
+            horizontal=True
         )
         
-        target_provider_name = "ollama" if "Ollama" in provider_choice else "mistral"
+        target_provider_name = "mistral" if "Mistral" in provider_choice else "ollama"
         if target_provider_name != st.session_state['selected_provider_type']:
             st.session_state['selected_provider_type'] = target_provider_name
             agent.set_provider(target_provider_name)
 
-    # ---------------------------------------------------------
-    # STATUS & PRIVACY BANNER
-    # ---------------------------------------------------------
     current_provider_type = st.session_state['selected_provider_type']
 
     if current_provider_type == "ollama":
-        ollama_online = OllamaProvider().check_health()
         model_display = AIConfig.LLM_MODEL
-        endpoint_display = AIConfig.OLLAMA_BASE_URL
-        status_color = "#00E676" if ollama_online else "#FFA500"
-        status_text = "ONLINE (qwen3:8b)" if ollama_online else "OFFLINE / FALLBACK MODE"
-        provider_label = "Local Ollama Engine"
-        privacy_badge = "LOCAL — telemetry remains on this machine."
-        privacy_color = "rgba(0, 230, 118, 0.15)"
-        privacy_border = "#00E676"
+        status_color = "#00E676" if ollama_online else "#8B949E"
+        status_text = "LOCAL ● ONLINE" if ollama_online else "LOCAL ● OFFLINE"
+        privacy_text = "Model runs locally through Ollama."
     else: # mistral
         mistral_prov = MistralProvider()
         mistral_status = mistral_prov.status()
         model_display = AIConfig.MISTRAL_MODEL
-        endpoint_display = "https://api.mistral.ai"
+        privacy_text = "Selected investigation evidence is sent to the Mistral API."
         
         if mistral_status == "CONFIGURED":
             status_color = "#00E676"
-            status_text = f"CONFIGURED ({AIConfig.MISTRAL_MODEL})"
-            provider_label = "Mistral Cloud API"
-            privacy_badge = "CLOUD API — selected evidence is sent to the Mistral API."
-            privacy_color = "rgba(124, 77, 255, 0.15)"
-            privacy_border = "#7C4DFF"
+            status_text = "CLOUD ● READY"
         elif mistral_status == "NOT_CONFIGURED":
             status_color = "#FFA500"
-            status_text = "NOT CONFIGURED (Missing MISTRAL_API_KEY)"
-            provider_label = "Mistral Cloud API"
-            privacy_badge = "CLOUD API — Set MISTRAL_API_KEY environment variable to enable."
-            privacy_color = "rgba(255, 165, 0, 0.15)"
-            privacy_border = "#FFA500"
-        else: # SDK_MISSING
+            status_text = "CLOUD ● MISSING MISTRAL_API_KEY"
+        else:
             status_color = "#FF5252"
-            status_text = "UNAVAILABLE (mistralai SDK missing)"
-            provider_label = "Mistral Cloud API"
-            privacy_badge = "CLOUD API — Install 'mistralai' Python package."
-            privacy_color = "rgba(255, 82, 82, 0.15)"
-            privacy_border = "#FF5252"
+            status_text = "CLOUD ● SDK MISSING"
 
     with col_prov2:
         st.markdown(f"""
-        <div style="background: linear-gradient(135deg, rgba(124,77,255,0.08) 0%, rgba(22,27,34,0.95) 100%); border: 1px solid {privacy_border}; border-radius: 8px; padding: 12px; margin-top: 4px;">
-            <div style="display:flex; justify-content:space-between; align-items:center;">
-                <div>
-                    <span class="badge badge-cyan">MODEL: {model_display}</span>
-                    <span class="badge" style="background-color:{privacy_color}; color:{privacy_border}; border:1px solid {privacy_border};">MODE: {privacy_badge}</span>
-                    <h5 style="color:{privacy_border} !important; margin-top:6px; margin-bottom:2px;">TRACEONE AGENTIC REASONING BACKPLANE</h5>
-                    <p style="font-size:0.8rem; color:#C9D1D9; margin:0;">
-                        <b>Core Policy:</b> <i>"No claim without evidence."</i> TraceONE deterministic tools remain the sole source of truth.
-                    </p>
-                </div>
-                <div style="text-align:right; min-width:180px;">
-                    <div style="font-size:1.0rem; font-weight:700; color:{status_color};">{status_text}</div>
-                    <div style="font-size:0.75rem; color:#8B949E; text-transform:uppercase;">{provider_label}</div>
-                </div>
-            </div>
+        <div style="text-align: right; padding-top: 4px;">
+            <span class="badge" style="background: rgba(22,27,34,0.9); color: {status_color}; border: 1px solid {status_color}; font-size: 0.8rem;">
+                {model_display} &nbsp;|&nbsp; {status_text}
+            </span><br/>
+            <span style="font-size: 0.72rem; color: #8B949E;"><i>{privacy_text}</i></span>
         </div>
         """, unsafe_allow_html=True)
 
@@ -127,44 +109,13 @@ def render_ai_investigator():
     # FALLBACK PROMPT BANNER IF MISTRAL UNCONFIGURED
     # ---------------------------------------------------------
     if current_provider_type == "mistral" and mistral_status != "CONFIGURED":
-        st.warning("⚠️ Mistral Cloud API key is not configured in the environment (`MISTRAL_API_KEY`). Queries will use evidence-grounded fallback responses unless you switch to Local Ollama.")
-        if st.button("🔄 Switch to Qwen3:8B Local (Ollama)", key="switch_to_ollama_fallback_btn"):
+        st.warning("⚠️ Mistral Cloud API key is not configured in environment (`MISTRAL_API_KEY`). Displaying deterministic TraceONE analytics fallback.")
+        if st.button("🔄 Switch to Qwen3 Local", key="switch_to_ollama_fallback_btn"):
             st.session_state['selected_provider_type'] = "ollama"
             agent.set_provider("ollama")
             st.rerun()
 
-    st.markdown("<br>", unsafe_allow_html=True)
-
-    # ---------------------------------------------------------
-    # DEMO QUERY SHORTCUTS (TEST 1 - TEST 8)
-    # ---------------------------------------------------------
-    st.markdown("#### ⚡ Pre-Configured Demo Investigation Queries (Phase M & Expansion Acceptance Tests)")
-    
-    demo_queries = [
-        ("TEST 1", "Why is EMP10194 high risk?"),
-        ("TEST 2", "Show the behavioral anomalies for EMP10194."),
-        ("TEST 3", "Compare EMP10194 with R&D peers."),
-        ("TEST 4", "Show the temporal sequence involving EMP10194."),
-        ("TEST 5", "Which users share the same IP as EMP10194?"),
-        ("TEST 6", "Show critical users by department."),
-        ("TEST 7", "What are the data quality limitations affecting this investigation?"),
-        ("TEST 8", "Show the graph relationships for EMP10194.")
-    ]
-
-    # Render in 2 rows of 4 buttons
-    col_row1 = st.columns(4)
-    for idx, (label, text) in enumerate(demo_queries[:4]):
-        with col_row1[idx]:
-            if st.button(f"📌 {label}\n{text[:26]}...", key=f"demo_btn_{idx}", help=text, use_container_width=True):
-                st.session_state['pending_query'] = text
-
-    col_row2 = st.columns(4)
-    for idx, (label, text) in enumerate(demo_queries[4:]):
-        with col_row2[idx]:
-            if st.button(f"📌 {label}\n{text[:26]}...", key=f"demo_btn_{idx+4}", help=text, use_container_width=True):
-                st.session_state['pending_query'] = text
-
-    st.markdown("<br>", unsafe_allow_html=True)
+    st.markdown("---")
 
     # ---------------------------------------------------------
     # CHAT HISTORY DISPLAY
@@ -190,30 +141,60 @@ def render_ai_investigator():
                         st.markdown(f"**Provider:** `{trace.get('llm_provider')} ({trace.get('model_name')})` (`{trace.get('execution_time_sec')}s`)")
 
     # ---------------------------------------------------------
-    # QUERY INPUT PROCESSING
+    # QUERY INPUT & SUGGESTED QUERY CHIPS
     # ---------------------------------------------------------
     query_to_run = None
 
-    # Check if demo button was clicked
     if 'pending_query' in st.session_state and st.session_state['pending_query']:
         query_to_run = st.session_state.pop('pending_query')
 
-    # Chat input field
-    user_input = st.chat_input("Ask AI Investigator a natural language security question...")
+    user_input = st.chat_input("Ask a security question (e.g., 'Why is EMP10194 high risk?')...")
     if user_input:
         query_to_run = user_input
 
+    # Compact Suggested Queries Bar
+    st.markdown("<div style='font-size:0.8rem; color:#8B949E; margin-bottom:4px;'>Suggested Security Investigations:</div>", unsafe_allow_html=True)
+    chip_col1, chip_col2, chip_col3, chip_col4 = st.columns(4)
+    
+    with chip_col1:
+        if st.button("📌 Why is EMP10194 high risk?", key="chip_1", use_container_width=True):
+            query_to_run = "Why is EMP10194 high risk?"
+    with chip_col2:
+        if st.button("📌 Critical users by department", key="chip_2", use_container_width=True):
+            query_to_run = "Show critical users by department."
+    with chip_col3:
+        if st.button("📌 Timeline for EMP10194", key="chip_3", use_container_width=True):
+            query_to_run = "Show the temporal sequence involving EMP10194."
+    with chip_col4:
+        if st.button("📌 Shared IP for EMP10194", key="chip_4", use_container_width=True):
+            query_to_run = "Which users share the same IP as EMP10194?"
+
+    with st.expander("▸ More Example Queries", expanded=False):
+        ex_col1, ex_col2, ex_col3, ex_col4 = st.columns(4)
+        with ex_col1:
+            if st.button("Behavior anomalies EMP10194", key="chip_5"):
+                query_to_run = "Show the behavioral anomalies for EMP10194."
+        with ex_col2:
+            if st.button("Compare EMP10194 peers", key="chip_6"):
+                query_to_run = "Compare EMP10194 with R&D peers."
+        with ex_col3:
+            if st.button("Data quality limitations", key="chip_7"):
+                query_to_run = "What are the data quality limitations affecting this investigation?"
+        with ex_col4:
+            if st.button("Graph for EMP10194", key="chip_8"):
+                query_to_run = "Show the graph relationships for EMP10194."
+
+    # ---------------------------------------------------------
+    # QUERY PROCESSING
+    # ---------------------------------------------------------
     if query_to_run:
-        # Append User Message to Chat History
         st.session_state['ai_chat_history'].append({"role": "user", "content": query_to_run})
 
         with st.chat_message("user"):
             st.markdown(query_to_run)
 
-        # Execute Agentic Investigation Pipeline
         with st.chat_message("assistant"):
-            with st.spinner("🤖 Agent analyzing request ➔ resolving entities ➔ querying deterministic tools ➔ building evidence package..."):
-                # Ensure active agent provider matches selected UI provider
+            with st.spinner("🤖 Agent analyzing request ➔ resolving entities ➔ building evidence package..."):
                 agent.set_provider(st.session_state['selected_provider_type'])
                 response = agent.query(query_to_run)
 
@@ -223,6 +204,9 @@ def render_ai_investigator():
             # Display Plotly Figure if generated
             if response.get("figure") is not None:
                 st.plotly_chart(response["figure"], use_container_width=True)
+
+            # Data Trust Lineage Reference
+            st.markdown("<div style='font-size:0.78rem; color:#8B949E; margin-top:4px;'>Evidence Source: <code>user_risk_scores.csv & canonical_events.csv</code>. <i>Full lineage available in Data Trust Center.</i></div>", unsafe_allow_html=True)
 
             # Display Observability Trace Expander (Compact metadata, collapsed by default)
             with st.expander("▸ Investigation details", expanded=False):

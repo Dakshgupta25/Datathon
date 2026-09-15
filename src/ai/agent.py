@@ -26,12 +26,17 @@ class TraceONEAgent:
         elif provider_name:
             self.llm = get_provider(provider_name)
         else:
-            # Default selection based on AIConfig / Ollama availability
-            selected_provider = get_provider(AIConfig.LLM_PROVIDER)
-            if selected_provider.health_check():
-                self.llm = selected_provider
+            pref_name = AIConfig.get_provider_name()
+            candidate = get_provider(pref_name)
+            if candidate.health_check():
+                self.llm = candidate
             else:
-                self.llm = MockProvider()
+                alt_name = "mistral" if pref_name == "ollama" else "ollama"
+                alt_cand = get_provider(alt_name)
+                if alt_cand.health_check():
+                    self.llm = alt_cand
+                else:
+                    self.llm = MockProvider()
 
         self.planner = QueryPlanner(self.llm)
         self.resolver = EntityResolver()
